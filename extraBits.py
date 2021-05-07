@@ -4,6 +4,8 @@ import math
 import numpy as np
 import time
 
+#©EMBL-European Bioinformatics Institues, 2021
+
 #Some functions that can be useful in maximum likelihood inference or in estimating an initial tree.
 #For example, one is for comparing two samples and deciding if one of them can be removed as 
 # strictly less informative than the other, and attached to the other sample after maximum
