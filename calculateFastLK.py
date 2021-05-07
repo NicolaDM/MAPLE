@@ -11,6 +11,8 @@ from Bio.Seq import _translate_str
 import time
 from ete3 import Tree
 
+#©EMBL-European Bioinformatics Institues, 2021
+
 #Efficiently calculating phylogenetic likelihoods.
 #Example run command line: python3 calculateFastLK.py --path /pathToFolder/ --reference EPI_ISL_402124_lowercase.fasta
 
