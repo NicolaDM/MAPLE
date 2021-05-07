@@ -18,6 +18,8 @@ import time
 
 from ete3 import Tree
 
+#©EMBL-European Bioinformatics Institues, 2021
+
 #Run a bunch of analyses regarding efficiently calculating phylogenetic likelihoods.
 #Also includes experimental code for estimating an initial tree (not finished yet).
 #Example run command line: python3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/createDiffsFile.py --path /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/
