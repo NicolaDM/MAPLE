@@ -9,7 +9,9 @@ table = CodonTable.ambiguous_dna_by_id[1]
 from Bio.Seq import _translate_str
 import time
 
-#Trnslate fasta alignment into diff file.
+#©EMBL-European Bioinformatics Institues, 2021
+
+#Translate fasta alignment into diff file.
 #Example run command line: python3 createDiffsFile.py --path /pathToFolder/ --reference EPI_ISL_402124_lowercase.fasta --fasta 2021-03-31_unmasked.fa --output 2021-03-31_unmasked_differences.txt
 
 parser = argparse.ArgumentParser(description='Translate fasta alignment into a diff file.')
