@@ -240,6 +240,11 @@ def pruningFast(node,mutMatrix,data,ref, cumulativeBases):
 		cumulPartLk1, probVect1= pruningFast(children[0],mutMatrix,data,ref, cumulativeBases)
 		cumulPartLk+=cumulPartLk1
 		if verbose:
+			node.name=""
+			for c in range(len(node.children)):
+				if c!=0:
+					node.name+="-"
+				node.name+=node.children[c].name
 			print("\n"+"Internal node "+node.name)
 			print("First child "+children[0].name)
 			print(probVect1)
