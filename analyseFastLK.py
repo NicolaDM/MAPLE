@@ -30,7 +30,7 @@ parser.add_argument("--createDiffFile", help="create a concise file replacing a 
 parser.add_argument("--reduceDiffFile", help="Reduce the size of a concise file by only including samples in the tree.", action="store_true")
 parser.add_argument("--onlyNambiguities", help="Treat all ambiguities as N (total missing information).", action="store_true")
 parser.add_argument("--useLogs", help="Calculate logarithms of non-mutation probabilities, otherwise approximate them.", action="store_true")
-parser.add_argument("--thresholdProb",help="relative probability threshold used to ignore possible states with very low probabilities.",  type=float, default=0.000001)
+parser.add_argument("--thresholdProb",help="relative probability threshold used to ignore possible states with very low probabilities.",  type=float, default=0.0000001)
 parser.add_argument("--verbose", help="Print to screen a lot of stuff.", action="store_true")
 parser.add_argument("--runAllData", help="Run the fast likelihood on the huge tree (takes about 2 minutes).", action="store_true")
 parser.add_argument("--subsample",help="Sample this number of samples from the original dataset and run likelihood comparison with PhyML.",  type=int, default=0)
@@ -249,7 +249,10 @@ print(str(len(samples))+" sequences in the concise DNA data file")
 
 #exit()
 range4=range(4)
+thresholdProb2=thresholdProb*thresholdProb
+thresholdProb4=thresholdProb2*thresholdProb2
 
+#if probability mass is concentrated in one nucleotide, simply the entry from O to another type.
 def simplfy(vec,refA):
 	maxP=0.0
 	maxI=0
@@ -257,6 +260,10 @@ def simplfy(vec,refA):
 		if vec[i]>maxP:
 			maxP=vec[i]
 			maxI=i
+	if maxP<thresholdProb4:
+		print("Inside simplify(), all values in vector are too small - something wrong?")
+		print(vec)
+		exit()
 	newVec=vec/maxP
 	numA=0
 	for i in range4:
@@ -270,6 +277,7 @@ def simplfy(vec,refA):
 	else:
 		return "O", newVec, maxP
 
+#Shorten genome list by mergeing together R entries that are mergeable
 def shorten(vec):
 	newVec=[]
 	entryOld=vec[0]
@@ -302,28 +310,28 @@ def probVectTerminalNode(diffs,bLen):
 			currPos=m[1]
 			if currPos>pos:
 				#region where the node with branch length bLen is identical to the ref.
-				probVect.append(["R",pos,currPos-pos,bLen])
+				probVect.append(["R",pos,currPos-pos,bLen,False])
 				pos=currPos
 			if m[0]=="n" or m[0]=="-":
 				length=m[2]
 				#region with no info, store first position and length.
-				probVect.append(["N",currPos,length,bLen])
+				probVect.append(["N",currPos,length,bLen,False])
 				pos=currPos+length
 			elif m[0] in allelesLow:
 				#position at which node allele is sure but is different from the reference.
-				probVect.append([m[0].upper(),currPos,1,bLen])
+				probVect.append([m[0].upper(),currPos,1,bLen,False])
 				pos=currPos+1
 			else:
 				# non-"n" ambiguity character; for now interpret this as ambiguity instead of as a polymorphism.
 				if onlyNambiguities:
 					# if user asks to, to make things easier, interpret any ambiguity as an "n".
-					probVect.append(["N",currPos,1,bLen])
+					probVect.append(["N",currPos,1,bLen,False])
 				else:
 					#otherwise, store as an "other" scenario, where each nucleotide has its own partial likelihood.
 					probVect.append(["O",currPos,1,bLen,ambiguities[m[0]]])
 				pos=currPos+1
 	if pos<=lRef:
-		probVect.append(["R",pos,lRef+1-pos,bLen])
+		probVect.append(["R",pos,lRef+1-pos,bLen,False])
 	return probVect
 
 #preliminary nuc mutation rate matrix, from De Maio et al 2021
@@ -332,7 +340,6 @@ mutMatrix[0][0]=-(mutMatrix[0][1]+mutMatrix[0][2]+mutMatrix[0][3])
 mutMatrix[1][1]=-(mutMatrix[1][0]+mutMatrix[1][2]+mutMatrix[1][3])
 mutMatrix[2][2]=-(mutMatrix[2][0]+mutMatrix[2][1]+mutMatrix[2][3])
 mutMatrix[3][3]=-(mutMatrix[3][0]+mutMatrix[3][1]+mutMatrix[3][2])
-thresholdProb2=thresholdProb*thresholdProb
 #Calculate likelihood?
 def pruningFast(node,mutMatrix,data,ref, cumulativeBases):
 	children=node.children
@@ -816,6 +823,94 @@ if runAllData:
 
 
 
+if newPhylogeny:
+	#read metadata to find sample times
+	#they are not exact times, just approximations to sort the samples based on collection times.
+	file=open(pathSimu+"metadata.csv")
+	line=file.readline()
+	line=file.readline()
+	dates={}
+	while line!="" and line!="\n":
+		linelist=line.split(",")
+		name=linelist[0]
+		dateList=(linelist[-1].replace("\n","")).split("-")
+		dates[name]=(int(dateList[0])-2019)*366
+		if len(dateList)>1:
+			dates[name]+=31*int(dateList[1])
+		else:
+			dates[name]+=31*12
+		if len(dateList)>2:
+			dates[name]+=int(dateList[2])
+		else:
+			dates[name]+=31
+		line=file.readline()
+	file.close()
+
+
+
+
+
+
+#sort sequences according to their sampling date. Not used as one ends up placing highly ambiguous sequences first, which is not optimal.
+def sortByDate(dates):
+	#start = time.time()
+	sampleDistances=[]
+	for sample in samples:
+		date=dates[sample]
+		sampleDistances.append((date,sample))
+
+	from operator import itemgetter
+	print("Now doing sorting")
+	sampleDistances.sort(key=itemgetter(0))
+	return sampleDistances
+
+
+#Same as distancesFromRef() but punishing more isolated N's and ambiguity codes.
+def distancesFromRefPunishNs(data):
+	#start = time.time()
+	sampleDistances=[]
+	for sample in samples:
+		diffs=data[sample]
+		pos=1
+		comparisons=0
+		diffNum=0
+		for m in diffs:
+			currPos=m[1]
+			if currPos>pos:
+				#region identical to the ref.
+				comparisons+=currPos-pos
+				pos=currPos
+			if m[0]=="n" or m[0]=="-":
+				pos=currPos+m[2]
+				if m[2]==1:
+					diffNum+=1
+			elif m[0] in allelesLow:
+				comparisons+=1
+				diffNum+=1
+				pos=currPos+1
+			else:
+				pos=currPos+1
+				diffNum+=1
+		if pos<=lRef:
+			comparisons+=lRef+1-pos
+		#print(sample)
+		#print(diffs)
+		#print(str(comparisons)+" "+str(diffNum)+"\n")
+		#if comparisons==0:
+		#	sampleDistances.append((lRef,sample))
+		#else:
+		sampleDistances.append((diffNum*1000+lRef-comparisons,sample))
+
+	from operator import itemgetter
+	print("Now doing sorting")
+	sampleDistances.sort(key=itemgetter(0))
+	#print(sampleDistances)
+	#time2 = time.time() - start
+	#print("Time to create a sorted list of distances from reference: "+str(time2))
+	return sampleDistances
+
+
+#Calculate distances of sequences from the reference, and return sorted list, with closest sequences first
 def distancesFromRef(data):
 	#start = time.time()
 	sampleDistances=[]
@@ -950,7 +1045,12 @@ def isMinorSequence(probVect1,probVect2):
 				else:
 					return 1
 
+
+
+
+
 #function to calculate likelihood of appending child to parent
+#CHECKED!
 def appendProb(probVectP,probVectC,bLen):
 	Lkcost=0.0
 	LkcostOriginal=0.0
@@ -975,7 +1075,13 @@ def appendProb(probVectP,probVectC,bLen):
 	length=end+1-pos
 	#implement parent-child likelihoood cost calculation!!!
 	while True:
+		#print(entry1)
+		#print(entry2)
+		#print("new cost updated:")
+		#print(Lkcost)
 		if entry1[0]=="N":
+			if not entry1[4]:
+				print("Warning, should have been True")
 			if entry2[0]=="N":
 				pass
 			elif entry2[0]=="R":
@@ -997,9 +1103,6 @@ def appendProb(probVectP,probVectC,bLen):
 						Lkcost+=mutMatrix[i][i]*bLen*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
 			elif entry2[0]=="O":
 				i1=allelesLow[ref[pos-1]]
-				#if entry2[4][i1]>0.5:
-				#	Lkcost+=mutMatrix[i1][i1]*bLen*entry2[4][1]
-				#else:
 				tot=0.0
 				for j in range4:
 					if i1!=j:
@@ -1008,6 +1111,8 @@ def appendProb(probVectP,probVectC,bLen):
 						tot+=(1.0+mutMatrix[i1][j]*bLen)*entry2[4][j]
 				Lkcost+=math.log(tot)
 			else:
+				if bLen<0.000000001:
+					return float("-inf")
 				i2=alleles[entry2[0]]
 				i1=allelesLow[ref[pos-1]]
 				Lkcost+=math.log(mutMatrix[i1][i2]*bLen)
@@ -1016,6 +1121,7 @@ def appendProb(probVectP,probVectC,bLen):
 			for i in range4:
 				tot1+=entry1[4][i]
 			LkcostOriginal+=math.log(tot1)
+			#print("LkcostOriginal updated "+str(LkcostOriginal))
 			if entry2[0]=="O":
 				tot=0.0
 				for i in range4:
@@ -1039,11 +1145,10 @@ def appendProb(probVectP,probVectC,bLen):
 				Lkcost+=math.log(tot)
 		#entry1 is a non-ref nuc
 		else:
+			i1=alleles[entry1[0]]
 			if entry2[0]==entry1[0]:
-				i2=alleles[entry2[0]]
-				Lkcost+=mutMatrix[i2][i2]*bLen
+				Lkcost+=mutMatrix[i1][i1]*bLen
 			else:
-				i1=alleles[entry1[0]]
 				if entry2[0]=="O":
 						tot=0.0
 						for j in range4:
@@ -1054,6 +1159,8 @@ def appendProb(probVectP,probVectC,bLen):
 						Lkcost+=math.log(tot)
 
 				else:
+					if bLen<0.000000001:
+						return float("-inf")
 					if entry2[0]=="R":
 						i2=allelesLow[ref[pos-1]]
 					else:
@@ -1083,14 +1190,13 @@ def appendProb(probVectP,probVectC,bLen):
 		if end2<end:
 			end=end2
 		length=end+1-pos
-
 	return Lkcost-LkcostOriginal
 
-
-#IMPLEMENT ALLOWEDFAILS!
+totalMissedMinors=[0]
 allowedFails=2
 def findBestParent(t1,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses):
 	if t1.is_leaf():
+		#print("Trying to place on leaf "+str(t1.dist))
 		probVect=t1.probVect
 		comparison=isMinorSequence(probVect,diffs)
 		if comparison==1:
@@ -1105,29 +1211,36 @@ def findBestParent(t1,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses):
 			print(sample)
 			print(probVect)
 			print(diffs)
-			exit()
-		return bestNodeSoFar, bestLKdiff
-	#if internal node
-	probVect=t1.probVectTot
-	print("Trying a new parent")
-	print(probVect)
-	print(diffs)
-	LKdiff=appendProb(probVect,diffs,bLen)
-	print("Comparison: "+str(comparison)+" failed passes before this step: "+str(failedPasses)+" logLK score: "+str(LKdiff))
-	foundBetter=False
-	if LKdiff>bestLKdiff:
-		print("New best LK")
-		bestLKdiff=LKdiff
-		bestNodeSoFar=t1
-		foundBetter=True
-		failedPasses=0
-	else:
-		failedPasses+=1
-		if failedPasses>allowedFails:
-			print("failed too many times, not passing to children")
-			return bestNodeSoFar , bestLKdiff
+			totalMissedMinors[0]+=1
+			#exit()
+		#return bestNodeSoFar, bestLKdiff
+	#if internal node, and if distant enough from its parent, try to append child here.
+	#print("Trying to place "+str(t1.dist)+" "+str(len(t1.children)))
+	#print(t1.probVect)
+	if t1.dist>0.000000001:
+		probVect=t1.probVectTot
+		LKdiff=appendProb(probVect,diffs,bLen)
+		if verbose:
+			print("Trying a new parent")
+			print(probVect)
+			print(diffs)
+			print("Failed passes before this step: "+str(failedPasses)+" logLK score: "+str(LKdiff))
+		foundBetter=False
+		if LKdiff>bestLKdiff:
+			if verbose:
+				print("New best LK")
+			bestLKdiff=LKdiff
+			bestNodeSoFar=t1
+			foundBetter=True
+			failedPasses=0
+		elif LKdiff<bestLKdiff-0.1:
+			failedPasses+=1
+			if failedPasses>allowedFails:
+				#if verbose:
+				print("failed too many times, not passing to children")
+				return bestNodeSoFar , bestLKdiff
 	for c in t1.children:
-		node, score = findBestParent(c,diffs,bLen,bestLKdiff,bestNodeSoFar,failedPasses)
+		node, score = findBestParent(c,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses)
 		if score>bestLKdiff:
 			bestLKdiff=score
 			bestNodeSoFar=node
@@ -1135,37 +1248,110 @@ def findBestParent(t1,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses):
 
 
 
-
-#for the root, finalize the likelihood and also return a vector of the root probability of each state
-def finalLKwithVector(probVect,ref,rootFreqsLog,rootFreqs):
-	logLK=0.0
+#for the root, return a vector taking into account the root frequency of each state
+#CHECKED
+def rootVector(probVect,rootFreqs,bLen):
 	newProbVect=[]
 	for entry in probVect:
-		#if entry[3]<thresholdProb:
-			#approximate assuming the distance is 0.0
-			if entry[0]=="R":
-				pos=entry[1]
-				end=entry[2]+pos-1
-				for i in range(4):
-					logLK+=rootFreqsLog[i]*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
-				newProbVect.append(("R",pos,entry[2],0.0))
-			elif entry[0]=="N":
-				newProbVect.append(("N",entry[1],entry[2],0.0))
-			elif entry[0]=="O":
-				#tot=0.0
-				newProbVect.append(("O",entry[1],entry[2],0.0,[]))
-				for i in range(4):
-					#tot+=rootFreqs[i]*entry[4][i]
-					newProbVect[-1][4].append(rootFreqs[i]*entry[4][i])
-				#logLK+=math.log(tot)
-			else:
-				i1=alleles[entry[0]]
-				newProbVect.append((entry[0],entry[1],entry[2],0.0))
-				logLK+=rootFreqsLog[i1]
-	return logLK, newProbVect
+		newEntry=list(entry)
+		if entry[0]=="N":
+			newEntry[4]=True
+		elif entry[0]=="O":
+			newEntry[4]=[]
+			for i in range4:
+					tot=0.0
+					for j in range4:
+						if i==j:
+							tot+=rootFreqs[i]*(1.0+mutMatrix[i][i]*(entry[3]+bLen))*entry[4][j]
+						else:
+							tot+=rootFreqs[i]*mutMatrix[i][j]*(entry[3]+bLen)*entry[4][j]
+					newEntry[4].append(tot)
+			newEntry[3]=0.0
+		else:
+			newEntry[4]=True
+			#distance from the root of the upward branch
+			newEntry[3]+=bLen
+			#distance from the root on the downward branch
+			newEntry.append(0.0)
+		newProbVect.append(newEntry)
+	return newProbVect
 
 
-#in order to insert a new child and calculate its cost, merge to vectors, one from above and onw from below, at an intermediate position 
+#for the root, return a vector taking into account the root frequency of each state (same as above, but assuming the branch length separating from the root is 0)
+#CHECKED
+def rootVector0(probVect,rootFreqs):
+	newProbVect=[]
+	for entry in probVect:
+		newEntry=list(entry)
+		if entry[0]=="N":
+			newEntry[4]=True
+		elif entry[0]=="O":
+			newEntry[4]=[]
+			for i in range4:
+				newEntry[4].append(entry[4][i]*rootFreqs[i])
+			newEntry[3]=0.0
+		else:
+			newEntry[4]=True
+			#distance from the root on the downward branch
+			newEntry.append(0.0)
+		newProbVect.append(newEntry)
+	return newProbVect
+
+
+
+#for the root, finalize the partial likelihood by multiplying by root frequencies, and return new vector (only affects O states)
+#OBSOLETE - now using rootVector0 which uses the new format and tracks of which entries need to be multiplied by root frequencies.
+# def multipyByRootProbs(probVect,rootFreqs):
+# 	newProbVect=[]
+# 	for entry in probVect:
+# 		newEntry=list(entry)
+# 		if entry[0]=="O":
+# 			newEntry[4]=np.ones(4)
+# 			for i in range4:
+# 				newEntry[4][i]=entry[4][i]*rootFreqs[i]
+# 		newProbVect.append(newEntry)
+# 	return newProbVect
+
+
+#for the root, finalize the likelihood and also return a vector of the root probability of each state
+#OBSOLETE!
+# def finalLKwithVector(probVect,ref,rootFreqsLog,rootFreqs,bLen):
+# 	logLK=0.0
+# 	newProbVect=[]
+# 	for entry in probVect:
+# 		#if entry[3]<thresholdProb:
+# 			#approximate assuming the distance is 0.0
+# 			if entry[0]=="R":
+# 				pos=entry[1]
+# 				end=entry[2]+pos-1
+# 				for i in range(4):
+# 					logLK+=rootFreqsLog[i]*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
+# 				newProbVect.append(("R",pos,entry[2],entry[3]+bLen))
+# 			elif entry[0]=="N":
+# 				newProbVect.append(("N",entry[1],entry[2],0.0))
+# 			elif entry[0]=="O":
+# 				#tot=0.0
+# 				newProbVect.append(("O",entry[1],entry[2],0.0,[]))
+# 				for i in range(4):
+# 					#tot+=rootFreqs[i]*entry[4][i]
+# 					tot=0.0
+# 					for j in range4:
+# 						if i==j:
+# 							tot+=rootFreqs[i]*(1.0+mutMatrix[i][i]*(entry[3]+bLen))*entry[4][j]
+# 						else:
+# 							tot+=rootFreqs[i]*mutMatrix[i][j]*(entry[3]+bLen)*entry[4][j]
+# 					#newProbVect[-1][4].append(rootFreqs[i]*entry[4][i])
+# 					newProbVect[-1][4].append(tot)
+# 				#logLK+=math.log(tot)
+# 			else:
+# 				i1=alleles[entry[0]]
+# 				newProbVect.append((entry[0],entry[1],entry[2],entry[3]+bLen))
+# 				logLK+=rootFreqsLog[i1]
+# 	return logLK, newProbVect
+
+
+#in order to insert a new child and calculate its cost, merge to vectors, one from above and one from below, at an intermediate position 
+#CHECKED!
 def mergeVectorsUpDown(probVectUp,bLenUp,probVectDown,bLenDown,mutMatrix):
 			probVect1= probVectUp
 			probVect2=probVectDown
@@ -1191,57 +1377,96 @@ def mergeVectorsUpDown(probVectUp,bLenUp,probVectDown,bLenDown,mutMatrix):
 				end=end2
 			length=end+1-pos
 			while True:
-				totLen=bLenUp+bLenDown+entry2[3]+entry1[3]
+				#totLen=bLenUp+bLenDown+entry2[3]+entry1[3]
 				if entry1[0]=="N":
 					probVect.append(list(entry2))
 					if entry2[0]=="N" or entry2[0]=="R": 
 						probVect[-1][2]=length
 						probVect[-1][1]=pos
-					probVect[-1][3]+=bLenDown
+					#probVect[-1][3]+=bLenDown
+					if entry2[0]!="O":
+						probVect[-1][4]=True
+						probVect[-1].append(0.0)
+						probVect[-1][3]+=bLenDown
+					else:
+						probVect[-1][4]=[]
+						for i in range4:
+							tot=0.0
+							for j in range4:
+								if i==j:
+									tot+=rootFreqs[i]*(1.0+mutMatrix[i][i]*(entry2[3]+bLenDown))*entry2[4][j]
+								else:
+									tot+=rootFreqs[i]*mutMatrix[i][j]*(entry2[3]+bLenDown)*entry2[4][j]
+							probVect[-1][4].append(tot)
+						probVect[-1][3]=0
 				elif entry2[0]=="N":
 					probVect.append(list(entry1))
 					if entry1[0]=="N" or entry1[0]=="R": 
 						probVect[-1][2]=length
 						probVect[-1][1]=pos
-					probVect[-1][3]+=bLenUp
+					#probVect[-1][3]+=bLenUp
+					if entry1[0]=="O":
+						probVect[-1][4]=list(entry1[4])
+						probVect[-1][3]+=bLenUp
+					elif probVect[-1][4]:
+						probVect[-1][5]+=bLenUp
+					else:
+						probVect[-1][3]+=bLenUp
 				elif entry1[0]=="R":
 					if entry2[0]=="R":
-						probVect.append(["R",pos,length,0.0])
-					elif entry2[0]=="O":
-						i1=allelesLow[ref[pos-1]]
-						newVec=np.ones(4)
-						for i in range4:
-							if i==i1:
-								newVec[i]=1.0+mutMatrix[i][i]*(entry1[3]+bLenUp)
-							else:
-								newVec[i]=mutMatrix[i1][i]*(entry1[3]+bLenUp)
-							tot=0.0
-							for j in range4:
-								if i==j:
-									tot+=(1.0+mutMatrix[i][i]*(entry2[3]+bLenDown))*entry2[4][j]
-								else:
-									tot+=mutMatrix[i][j]*(entry2[3]+bLenDown)*entry2[4][j]
-							newVec[i]*=tot
-						state, newVec, maxP =simplfy(newVec,ref[pos-1])
-						probVect.append([state,pos,1,0.0,newVec])
-
+						probVect.append(["R",pos,length,0.0,False])
 					else:
-						i2=alleles[entry2[0]]
 						i1=allelesLow[ref[pos-1]]
 						newVec=np.ones(4)
-						for i in range4:
-							if i==i2:
-								newVec[i]=1.0+mutMatrix[i][i]*(entry2[3]+bLenDown)
-							else:
-								newVec[i]=mutMatrix[i][i2]*(entry2[3]+bLenDown)
-							if i==i1:
-								newVec[i]*=1.0+mutMatrix[i][i]*(entry1[3]+bLenUp)
-							else:
-								newVec[i]*=mutMatrix[i1][i]*(entry1[3]+bLenUp)
-						if (entry2[3]+bLenDown)<thresholdProb2 or (entry1[3]+bLenUp)<thresholdProb2 :
-							state, newVec, maxP =simplfy(newVec,ref[pos-1])
-							probVect.append([state,pos,1,0.0,newVec])
+						if entry1[4]:
+							rootVec=np.ones(4)
+							for i in range4:
+								rootVec[i]=rootFreqs[i]
+								if i==i1:
+									rootVec[i]*=(1.0+mutMatrix[i][i1]*(entry1[3]))
+								else:
+									rootVec[i]*=mutMatrix[i][i1]*(entry1[3])
+							for j in range4:
+								tot=0.0
+								for i in range4:
+									if j==i:
+										tot+=(1.0+mutMatrix[i][j]*(entry1[5]+bLenUp))*rootVec[i]
+									else:
+										tot+=mutMatrix[i][j]*(entry1[5]+bLenUp)*rootVec[i]
+								newVec[j]=tot
 						else:
+							for i in range4:
+								if i==i1:
+									newVec[i]=1.0+mutMatrix[i][i]*(entry1[3]+bLenUp)
+								else:
+									newVec[i]=mutMatrix[i1][i]*(entry1[3]+bLenUp)
+						if entry2[0]=="O":
+							for j in range4:
+								tot=0.0
+								for i in range4:
+									if j==i:
+										tot+=(1.0+mutMatrix[j][i]*(entry2[3]+bLenDown))*entry2[4][i]
+									else:
+										tot+=mutMatrix[j][i]*(entry2[3]+bLenDown)*entry2[4][i]
+								newVec[j]*=tot
+							state, newVec, maxP =simplfy(newVec,ref[pos-1])
+							if state=="O":
+								probVect.append([state,pos,1,0.0,newVec])
+							else:
+								probVect.append([state,pos,1,0.0,False])
+						else:
+							if bLenDown+bLenUp<0.000000001:
+								print("Warning, inside mergeVectorsUpDown, branch lengths are 0, but the two vectors are different")
+								print(probVectUp)
+								print(bLenUp)
+								print(probVectDown)
+								print(bLenDown)
+							i2=alleles[entry2[0]]
+							for i in range4:
+								if i==i2:
+									newVec[i]*=1.0+mutMatrix[i][i]*(entry2[3]+bLenDown)
+								else:
+									newVec[i]*=mutMatrix[i][i2]*(entry2[3]+bLenDown)
 							probVect.append(["O",pos,1,0.0,newVec])
 				elif entry1[0]=="O":
 					newVec=np.ones(4)
@@ -1282,41 +1507,80 @@ def mergeVectorsUpDown(probVectUp,bLenUp,probVectDown,bLenDown,mutMatrix):
 								else:
 									newVec[i]*=mutMatrix[i][i2]*(entry2[3]+bLenDown)
 					state, newVec, maxP =simplfy(newVec,ref[pos-1])
-					probVect.append([state,pos,1,0.0,newVec])
+					if state=="O":
+						probVect.append([state,pos,1,0.0,newVec])
+					else:
+						probVect.append([state,pos,1,0.0,False])
 				#entry1 is a non-ref nuc
 				else:
+					#print("non-ref nuc")
 					if entry2[0]==entry1[0]:
-						i2=alleles[entry2[0]]
-						probVect.append([entry1[0],pos,1,0.0])
+						probVect.append([entry1[0],pos,1,0.0,False])
 					else:
 						i1=alleles[entry1[0]]
 						newVec=np.ones(4)
-						for i in range4:
-							if i==i1:
-								newVec[i]=1.0+mutMatrix[i][i]*(entry1[3]+bLenUp)
-							else:
-								newVec[i]=mutMatrix[i1][i]*(entry1[3]+bLenUp)
+						if entry1[4]:
+							#print("root stuff")
+							#print(entry1[3])
+							#print(entry1[5]+bLenUp)
+							#print(mutMatrix[1][3])
+							#print(mutMatrix[3][1])
+							rootVec=np.ones(4)
+							for i in range4:
+								rootVec[i]=rootFreqs[i]
+								if i==i1:
+									rootVec[i]*=(1.0+mutMatrix[i][i1]*(entry1[3]))
+								else:
+									rootVec[i]*=mutMatrix[i][i1]*(entry1[3])
+							#print(rootVec)
+							for j in range4:
+								tot=0.0
+								for i in range4:
+									if j==i:
+										tot+=(1.0+mutMatrix[i][j]*(entry1[5]+bLenUp))*rootVec[i]
+									else:
+										tot+=mutMatrix[i][j]*(entry1[5]+bLenUp)*rootVec[i]
+								newVec[j]=tot
+							#print("newVec:")
+							#print(newVec)
+						else:
+							for i in range4:
+								if i==i1:
+									newVec[i]=1.0+mutMatrix[i][i]*(entry1[3]+bLenUp)
+								else:
+									newVec[i]=mutMatrix[i1][i]*(entry1[3]+bLenUp)
 						if entry2[0]=="O":
 							for i in range4:
 								tot=0.0
 								for j in range4:
 									if i==j:
-										tot+=(1.0+mutMatrix[i][i]*(entry1[3]+bLenUp))*entry2[4][j]
+										tot+=(1.0+mutMatrix[i][i]*(entry2[3]+bLenDown))*entry2[4][j]
 									else:
-										tot+=mutMatrix[i][j]*(entry1[3]+bLenUp)*entry2[4][j]
+										tot+=mutMatrix[i][j]*(entry2[3]+bLenDown)*entry2[4][j]
 								newVec[i]*=tot
 							state, newVec, maxP =simplfy(newVec,ref[pos-1])
-							probVect.append([state,pos,1,0.0,newVec])
+							if state=="O":
+								probVect.append([state,pos,1,0.0,newVec])
+							else:
+								probVect.append([state,pos,1,0.0,False])
 						else:
+							if bLenDown+bLenUp<0.000000001:
+								print("Warning, inside mergeVectorsUpDown, branch lengths are 0, but the two vectors are different")
+								print(probVectUp)
+								print(bLenUp)
+								print(probVectDown)
+								print(bLenDown)
 							if entry2[0]=="R":
 								i2=allelesLow[ref[pos-1]]
 							else:
 								i2=alleles[entry2[0]]
 							for i in range4:
 								if i==i2:
-									newVec[i]*=1.0+mutMatrix[i][i]*(entry1[3]+bLenUp)
+									newVec[i]*=1.0+mutMatrix[i][i]*(entry2[3]+bLenDown)
 								else:
-									newVec[i]*=mutMatrix[i][i2]*(entry1[3]+bLenUp)
+									newVec[i]*=mutMatrix[i][i2]*(entry2[3]+bLenDown)
+							#print("newVec again")
+							#print(newVec)
 							probVect.append(["O",pos,1,0.0,newVec])
 
 				#update pos, end, etc
@@ -1354,13 +1618,13 @@ def mergeVectorsUpDown(probVectUp,bLenUp,probVectDown,bLenDown,mutMatrix):
 			if verbose:
 				print("Shortened genome vector for internal node "+node.name)
 				print(probVect1)
-		
 			return probVect1
 
 
 
 
 #merge two child vectors at the root and calculate the logLk, and return vector and logLK.
+#CHECKED!
 def mergeVectorsRoot(probVect1,bLen1,probVect2,bLen2,mutMatrix):
 			#now traverse the two genome vectors and create a new probVect while also updating the cumulPartLk
 			cumulPartLk=0.0
@@ -1392,15 +1656,19 @@ def mergeVectorsRoot(probVect1,bLen1,probVect2,bLen2,mutMatrix):
 						probVect[-1][2]=length
 						probVect[-1][1]=pos
 					probVect[-1][3]+=bLen2
+					if entry2[0]=="O":
+						probVect[-1][4]=list(entry2[4])
 				elif entry2[0]=="N":
 					probVect.append(list(entry1))
 					if entry1[0]=="N" or entry1[0]=="R": 
 						probVect[-1][2]=length
 						probVect[-1][1]=pos
 					probVect[-1][3]+=bLen1
+					if entry1[0]=="O":
+						probVect[-1][4]=list(entry1[4])
 				elif entry1[0]=="R":
 					if entry2[0]=="R":
-						probVect.append(["R",pos,length,0.0])
+						probVect.append(["R",pos,length,0.0,False])
 						#Now update partial likelihood
 						if useLogs:
 							for i in range4:
@@ -1550,13 +1818,203 @@ def mergeVectorsRoot(probVect1,bLen1,probVect2,bLen2,mutMatrix):
 				if end2<end:
 					end=end2
 				length=end+1-pos
-
 			return probVect, cumulPartLk
 
 
 
 
-def probRoot(probVect):
+#merge two child vectors at an internal node.
+#CHECKED!
+def mergeVectors(probVect1,bLen1,probVect2,bLen2,mutMatrix):
+			probVect=[]
+			indexEntry1=0
+			indexEntry2=0
+			pos=1
+			entry1=probVect1[indexEntry1]
+			pos1=entry1[1]
+			if entry1[0]!="N" and entry1[0]!="R":
+				end1=pos1
+			else:
+				end1=pos1+entry1[2]-1
+			entry2=probVect2[indexEntry2]
+			pos2=entry2[1]
+			if entry2[0]!="N" and entry2[0]!="R":
+				end2=pos2
+			else:
+				end2=pos2+entry2[2]-1
+			end=end1
+			if end2<end:
+				end=end2
+			length=end+1-pos
+			while True:
+				#totLen=entry1[3]+entry2[3]+bLen1+bLen2
+				if entry1[0]=="N":
+					probVect.append(list(entry2))
+					if entry2[0]=="N" or entry2[0]=="R": 
+						probVect[-1][2]=length
+						probVect[-1][1]=pos
+					probVect[-1][3]+=bLen2
+					if entry2[0]=="O":
+						probVect[-1][4]=list(entry2[4])
+				elif entry2[0]=="N":
+					probVect.append(list(entry1))
+					if entry1[0]=="N" or entry1[0]=="R": 
+						probVect[-1][2]=length
+						probVect[-1][1]=pos
+					probVect[-1][3]+=bLen1
+					if entry1[0]=="O":
+						probVect[-1][4]=list(entry1[4])
+				elif entry1[0]=="R":
+					if entry2[0]=="R":
+						probVect.append(["R",pos,length,0.0,False])
+					elif entry2[0]=="O":
+						i1=allelesLow[ref[pos-1]]
+						newVec=np.ones(4)
+						for i in range4:
+							if i==i1:
+								newVec[i]=1.0+mutMatrix[i][i]*(entry1[3]+bLen1)
+							else:
+								newVec[i]=mutMatrix[i][i1]*(entry1[3]+bLen1)
+							tot=0.0
+							for j in range4:
+								if i==j:
+									tot+=(1.0+mutMatrix[i][i]*(entry2[3]+bLen2))*entry2[4][j]
+								else:
+									tot+=mutMatrix[i][j]*(entry2[3]+bLen2)*entry2[4][j]
+							newVec[i]*=tot
+						state, newVec, maxP =simplfy(newVec,ref[pos-1])
+						if state=="O":
+							probVect.append([state,pos,1,0.0,newVec])
+						else:
+							probVect.append([state,pos,1,0.0,False])
+					else:
+						i2=alleles[entry2[0]]
+						i1=allelesLow[ref[pos-1]]
+						newVec=np.ones(4)
+						for i in range4:
+							if i==i2:
+								newVec[i]=1.0+mutMatrix[i][i]*(entry2[3]+bLen2)
+							else:
+								newVec[i]=mutMatrix[i][i2]*(entry2[3]+bLen2)
+							if i==i1:
+								newVec[i]*=1.0+mutMatrix[i][i]*(entry1[3]+bLen1)
+							else:
+								newVec[i]*=mutMatrix[i][i1]*(entry1[3]+bLen1)
+						probVect.append(["O",pos,1,0.0,newVec])
+				elif entry1[0]=="O":
+					newVec=np.ones(4)
+					if entry2[0]=="O":
+						#print("O")
+						for i in range4:
+							tot1=0.0
+							tot2=0.0
+							for j in range4:
+								if i==j:
+									tot1+=(1.0+mutMatrix[i][i]*(entry1[3]+bLen1))*entry1[4][j]
+									tot2+=(1.0+mutMatrix[i][i]*(entry2[3]+bLen2))*entry2[4][j]
+								else:
+									tot1+=mutMatrix[i][j]*(entry1[3]+bLen1)*entry1[4][j]
+									tot2+=mutMatrix[i][j]*(entry2[3]+bLen2)*entry2[4][j]
+							newVec[i]*=tot1*tot2
+					else:
+						for i in range4:
+							tot1=0.0
+							for j in range4:
+								if i==j:
+									tot1+=(1.0+mutMatrix[i][i]*(entry1[3]+bLen1))*entry1[4][j]
+								else:
+									tot1+=mutMatrix[i][j]*(entry1[3]+bLen1)*entry1[4][j]
+							newVec[i]=tot1
+						if entry2[0]=="R":
+							i2=allelesLow[ref[pos-1]]
+							for i in range4:
+								if i==i2:
+									newVec[i]*=1.0+mutMatrix[i][i]*(entry2[3]+bLen2)
+								else:
+									newVec[i]*=mutMatrix[i][i2]*(entry2[3]+bLen2)
+						else:
+							i2=alleles[entry2[0]]
+							for i in range4:
+								if i==i2:
+									newVec[i]*=1.0+mutMatrix[i][i]*(entry2[3]+bLen2)
+								else:
+									newVec[i]*=mutMatrix[i][i2]*(entry2[3]+bLen2)
+					state, newVec, maxP =simplfy(newVec,ref[pos-1])
+					if state=="O":
+						probVect.append([state,pos,1,0.0,newVec])
+					else:
+						probVect.append([state,pos,1,0.0,False])
+				#entry1 is a non-ref nuc
+				else:
+					if entry2[0]==entry1[0]:
+						i2=alleles[entry2[0]]
+						probVect.append([entry1[0],pos,1,0.0,False])
+					else:
+						i1=alleles[entry1[0]]
+						newVec=np.ones(4)
+						for i in range4:
+							if i==i1:
+								newVec[i]=1.0+mutMatrix[i][i]*(entry1[3]+bLen1)
+							else:
+								newVec[i]=mutMatrix[i][i1]*(entry1[3]+bLen1)
+						if entry2[0]=="O":
+							for i in range4:
+								tot=0.0
+								for j in range4:
+									if i==j:
+										tot+=(1.0+mutMatrix[i][i]*(entry2[3]+bLen2))*entry2[4][j]
+									else:
+										tot+=mutMatrix[i][j]*(entry2[3]+bLen2)*entry2[4][j]
+								newVec[i]*=tot
+							state, newVec, maxP =simplfy(newVec,ref[pos-1])
+							if state=="O":
+								probVect.append([state,pos,1,0.0,newVec])
+							else:
+								probVect.append([state,pos,1,0.0,False])
+						else:
+							if entry2[0]=="R":
+								i2=allelesLow[ref[pos-1]]
+							else:
+								i2=alleles[entry2[0]]
+							for i in range4:
+								if i==i2:
+									newVec[i]*=1.0+mutMatrix[i][i]*(entry2[3]+bLen2)
+								else:
+									newVec[i]*=mutMatrix[i][i2]*(entry2[3]+bLen2)
+							probVect.append(["O",pos,1,0.0,newVec])
+
+				#update pos, end, etc
+				pos+=length
+				if pos>lRef:
+					break
+				if pos>end1:
+					indexEntry1+=1
+					entry1=probVect1[indexEntry1]
+					pos1=entry1[1]
+					if entry1[0]!="N" and entry1[0]!="R":
+						end1=pos1
+					else:
+						end1=pos1+entry1[2]-1
+				if pos>end2:
+					indexEntry2+=1
+					entry2=probVect2[indexEntry2]
+					pos2=entry2[1]
+					if entry2[0]!="N" and entry2[0]!="R":
+						end2=pos2
+					else:
+						end2=pos2+entry2[2]-1
+				end=end1
+				if end2<end:
+					end=end2
+				length=end+1-pos
+			return probVect
+
+
+
+
+
+#Total probability of partial likelihood vector of the root after merging with root frequencies
+def findProbRoot(probVect):
 	logLK=0.0
 	for entry in probVect:
 			if entry[0]=="R":
@@ -1577,47 +2035,435 @@ def probRoot(probVect):
 	return logLK
 
 
-#we know that sample, with partials newPartials, is best placed as child of node resulting in logLK contribution of bestLKdiff
-# now explore exactly which position near node is best for placement: parent, child, child's parent, sibling,
-#then add the sample at that position of the tree, and update all the internal probability vectors?
-def placeSampleOnTree(node,newPartials,sample,bestNewLK,bLen):
-	#place as sibling of either child
-	if len(node.children)==2:
-		probVectChid1=mergeVectorsUpDown(node.probVectUpRight,bLen,node.children[0].probVect,bLen,mutMatrix)
-		probChild1=appendProb(probVectChid1,newPartials,bLen)
-		probVectChid2=mergeVectorsUpDown(node.probVectUpLeft,bLen,node.children[1].probVect,bLen,mutMatrix)
-		probChild2=appendProb(probVectChid2,newPartials,bLen)
-		if probChild2>probChild1:
-			probChild=probChild2
-			probVectChid=probVectChid2
-			child=1
-		else:
-			probChild=probChild1
-			probVectChid=probVectChid1
-			child=0
-	#if node is root, try to place as sibling of the current root.
-	if node.is_root():
-		probOldRoot = probRoot(node.probVect)
-		probVectRoot,probRoot = mergeVectorsRoot(node.probVect,bLen,newPartials,bLen,mutMatrix)
-		probRoot+= probRoot(probVectRoot)
-		if probRoot-probOldRoot>probChild:
-			#CREATE NEW ROOT
-			#CALL FUNCTIONS TO UPDATE PROBABILITY VECTORS IN DESCENDANTS
-			return
-	#CREATE NEW INTERNAL NODE AND ADD CHILD INSTEAD
-	#CALL FUNCTIONS TO UPDATE PROBABILITY VECTORS IN DESCENDANTS
 
+
+#Check if two genome lists represent the same partial likelihoods or not
+def areVectorsDifferent(probVect1,probVect2):
+	indexEntry1=0
+	indexEntry2=0
+	pos=1
+	entry1=probVect1[indexEntry1]
+	pos1=entry1[1]
+	if entry1[0]!="N" and entry1[0]!="R":
+		end1=pos1
+	else:
+		end1=pos1+entry1[2]-1
+	entry2=probVect2[indexEntry2]
+	pos2=entry2[1]
+	if entry2[0]!="N" and entry2[0]!="R":
+		end2=pos2
+	else:
+		end2=pos2+entry2[2]-1
+	end=end1
+	if end2<end:
+		end=end2
+	length=end+1-pos
+	while True:
+		if entry1[0]!=entry2[0]:
+			if entry1[0]!="O":
+				if entry2[0]!="O":
+					return True
+				else:
+					if entry1[0]=="N":
+						return True
+					vSum=np.sum(entry2[4])
+					vect=entry2[4]/vSum
+					if not vSum>.000000000000000000000001:
+						print("Problem? sum of partial likelihoods is very low or nan")
+						print(probVect1)
+						print(probVect2)
+						exit()
+					if entry1[0]=="R":
+						i1=allelesLow[ref[pos-1]]
+					else:
+						i1=alleles[entry1[0]]
+					if vect[i1]<0.999:
+						return True
+			else:
+				if entry2[0]=="N":
+					return True
+				vSum=np.sum(entry1[4])
+				if not vSum>.000000000000000000000001:
+					print("Problem? sum of partial likelihoods is very low or nan")
+					print(probVect1)
+					print(probVect2)
+					exit()
+				vect=entry1[4]/vSum
+				if entry2[0]=="R":
+					i2=allelesLow[ref[pos-1]]
+				else:
+					i2=alleles[entry2[0]]
+				if vect[i2]<0.999:
+					return True
+
+		elif entry1[0]=="O":
+			vect1=entry1[4]
+			vect2=entry2[4]
+			maxP1=-1.0
+			maxP2=-1.0
+			for i in range4:
+				if vect1[i]>maxP1:
+					maxP1=vect1[i]
+				if vect2[i]>maxP2:
+					maxP2=vect2[i]
+			for i in range4:
+				if abs((vect1[i]/maxP1) - (vect2[i]/maxP2))>0.001:
+					return True
+
+		#update pos, end, etc
+		pos+=length
+		if pos>lRef:
+			break
+		if pos>end1:
+			indexEntry1+=1
+			entry1=probVect1[indexEntry1]
+			pos1=entry1[1]
+			if entry1[0]!="N" and entry1[0]!="R":
+				end1=pos1
+			else:
+				end1=pos1+entry1[2]-1
+		if pos>end2:
+			indexEntry2+=1
+			entry2=probVect2[indexEntry2]
+			pos2=entry2[1]
+			if entry2[0]!="N" and entry2[0]!="R":
+				end2=pos2
+			else:
+				end2=pos2+entry2[2]-1
+		end=end1
+		if end2<end:
+			end=end2
+		length=end+1-pos
+	return False
+
+
+
+
+#Update partial likelihood vectors in the tree after the addition of a new tip.
+#This function traverses the tree downward.
+def updatePartialsFromTop(node,probVectUp,mutMatrix):
+	print("\n\n Inside updatePartialsFromTop()")
+	print(probVectUp)
+	print(node.probVect)
+	if len(node.children)==0:
+		node.probVectTot=mergeVectorsUpDown(probVectUp,node.dist,node.probVect,0.0,mutMatrix)
+	else:
+		child0Vect=node.children[0].probVect
+		child1Vect=node.children[1].probVect
+		dist0=node.children[0].dist
+		dist1=node.children[1].dist
+		newUpRight=mergeVectorsUpDown(probVectUp,node.dist,child1Vect,dist1,mutMatrix)
+		print("Updating upLeft")
+		print(probVectUp)
+		print(node.dist)
+		print(child0Vect)
+		print(dist0)
+		newUpLeft=mergeVectorsUpDown(probVectUp,node.dist,child0Vect,dist0,mutMatrix)
+		updatedTot=False
+		print("Inside updatePartialsFromTop")
+		print(node.probVectUpRight)
+		print(newUpRight)
+		print(node.probVectUpLeft)
+		print(newUpLeft)
+		if areVectorsDifferent(node.probVectUpRight,newUpRight):
+			print("upRight is different, making the update.")
+			newUpRight =shorten(newUpRight)
+			node.probVectUpRight=newUpRight
+			newTot=mergeVectorsUpDown(newUpRight,0.0,child0Vect,dist0,mutMatrix)
+			node.probVectTot=newTot
+			updatedTot=True
+			updatePartialsFromTop(node.children[0],newUpRight,mutMatrix)
+		if areVectorsDifferent(node.probVectUpLeft,newUpLeft):
+			print("upLeft is different, making the update.")
+			newUpLeft =shorten(newUpLeft)
+			node.probVectUpLeft=newUpLeft
+			if not updatedTot:
+				newTot=mergeVectorsUpDown(newUpLeft,0.0,child1Vect,dist1,mutMatrix)
+				node.probVectTot=newTot
+			updatePartialsFromTop(node.children[1],newUpLeft,mutMatrix)
+	print("End of updatePartialsFromTop")
+	#print(logLK)
+	print("\n")
+
+
+#Update partial likelihood vectors in the tree after the addition of a new tip.
+#This function traverses the tree upward.
+def updatePartialsFromBottom(node,probVectDown,bLen,childNum,childNode,mutMatrix):
+	if childNum==-1:
+		if node.children[0]==childNode:
+			childNum=0
+		else:
+			childNum=1
+	otherChildNum=1-childNum
+	otherChildVect=node.children[otherChildNum].probVect
+	newVect=mergeVectors(otherChildVect,bLen,probVectDown,bLen,mutMatrix)
+	if verbose:
+		print("Updating vectors from bottom, new vec")
+		print(newVect)
+		print("Old vec:")
+		print(node.probVect)
+	updatedTot=False
+	if areVectorsDifferent(node.probVect,newVect):
+		if verbose:
+			print("Vectors are different")
+		newVect =shorten(newVect)
+		node.probVect=newVect
+		if childNum==0:
+			newTot=mergeVectorsUpDown(node.probVectUpRight,0.0,probVectDown,bLen,mutMatrix)
+		else:
+			newTot=mergeVectorsUpDown(node.probVectUpLeft,0.0,probVectDown,bLen,mutMatrix)
+		node.probVectTot=newTot
+		if verbose:
+			print("new tot vect")
+			print(node.probVectTot)
+		updatedTot=True
+		if node.up != None:
+			updatePartialsFromBottom(node.up,newVect,bLen,childNum,node,mutMatrix)
+		if verbose:
+			print("Old upRight and UpLeft:")
+			print(node.probVectUpRight)
+			print(node.probVectUpLeft)
+	if node.up != None:
+		if verbose:
+			print("Trying to move up while updating partials")
+		if node.up.children[0]==node:
+			vectUp=node.up.probVectUpRight
+		else:
+			vectUp=node.up.probVectUpLeft
+		if childNum==0:
+			newUpLeftVect=mergeVectorsUpDown(vectUp,bLen,probVectDown,bLen,mutMatrix)
+			if areVectorsDifferent(node.probVectUpLeft,newUpLeftVect):
+				if verbose:
+					print("Moving up the update from left; new UpLeft and old UpLeft")
+					print(newUpLeftVect)
+					print(node.probVectUpLeft)
+				newUpLeftVect =shorten(newUpLeftVect)
+				node.probVectUpLeft=newUpLeftVect
+				if not updatedTot:
+					if verbose:
+						print("Updating tot: old tot and new tot")
+						print(node.probVectTot)
+					newTot=mergeVectorsUpDown(newUpLeftVect,0.0,node.children[1].probVect,bLen,mutMatrix)
+					node.probVectTot=newTot
+					if verbose:
+						print(newTot)
+				
+				updatePartialsFromTop(node.children[1],newUpLeftVect,mutMatrix)
+		else:
+			newUpRightVect=mergeVectorsUpDown(vectUp,bLen,probVectDown,bLen,mutMatrix)
+			if areVectorsDifferent(node.probVectUpRight,newUpRightVect):
+				if verbose:
+					print("Moving up the update from right")
+				newUpRightVect =shorten(newUpRightVect)
+				node.probVectUpRight=newUpRightVect
+				if not updatedTot:
+					newTot=mergeVectorsUpDown(newUpRightVect,0.0,node.children[0].probVect,bLen,mutMatrix)
+					node.probVectTot=newTot
+				updatePartialsFromTop(node.children[0],newUpRightVect,mutMatrix)
+	#case node is root
+	else:
+		if verbose:
+			print("reached root while moving up")
+		if childNum==0:
+			#newUpLeftVect=finalLKwithVector(probVectDown,ref,rootFreqsLog,rootFreqs,bLen)
+			newUpLeftVect=rootVector(probVectDown,rootFreqs,bLen)
+			if areVectorsDifferent(node.probVectUpLeft,newUpLeftVect):
+				newUpLeftVect =shorten(newUpLeftVect)
+				node.probVectUpLeft=newUpLeftVect
+				if not updatedTot:
+					newTot=mergeVectorsUpDown(newUpLeftVect,0.0,node.children[1].probVect,bLen,mutMatrix)
+					node.probVectTot=newTot
+				updatePartialsFromTop(node.children[1],newUpLeftVect,mutMatrix)
+
+		else:
+			#newUpRightVect=finalLKwithVector(probVectDown,ref,rootFreqsLog,rootFreqs,bLen)
+			newUpRightVect=rootVector(probVectDown,rootFreqs,bLen)
+			if areVectorsDifferent(node.probVectUpRight,newUpRightVect):
+				newUpRightVect =shorten(newUpRightVect)
+				node.probVectUpRight=newUpRightVect
+				if not updatedTot:
+					newTot=mergeVectorsUpDown(newUpRightVect,0.0,node.children[0].probVect,bLen,mutMatrix)
+					node.probVectTot=newTot
+				updatePartialsFromTop(node.children[0],newUpRightVect,mutMatrix)
+	if verbose:
+		print("New upRight, UpLeft and tot:")
+		print(node.probVectUpRight)
+		print(node.probVectUpLeft)
+		print(node.probVectTot)
 	return
 
 
 
 
+#we know that sample, with partials newPartials, is best placed as child of node resulting in logLK contribution of bestLKdiff
+# now explore exactly which position near node is best for placement: parent, child, child's parent, sibling,
+#then add the sample at that position of the tree, and update all the internal probability vectors?
+def placeSampleOnTree(node,newPartials,sample,bLen):
+	#place as sibling of either child
+	if len(node.children)==2:
+		if verbose:
+			print("Trying to place sample at new internal node; current UpRight, child0, UpLef, child1.")
+			print(node.probVectUpRight)
+			print(node.children[0].probVect)
+			print(node.probVectUpLeft)
+			print(node.children[1].probVect)
+		probVectChid1=mergeVectorsUpDown(node.probVectUpRight,bLen,node.children[0].probVect,bLen,mutMatrix)
+		probChild1=appendProb(probVectChid1,newPartials,bLen)
+		probVectChid2=mergeVectorsUpDown(node.probVectUpLeft,bLen,node.children[1].probVect,bLen,mutMatrix)
+		probChild2=appendProb(probVectChid2,newPartials,bLen)
+		if verbose:
+			print("Vector 1 to append to, LK1, vector 2 to append to, LK2")
+			print(probVectChid1)
+			print(probChild1)
+			print(probVectChid2)
+			print(probChild2)
+		if probChild2>probChild1:
+			probChild=probChild2
+			probVectChid=probVectChid2
+			vectUp=node.probVectUpLeft
+			child=1
+		else:
+			probChild=probChild1
+			probVectChid=probVectChid1
+			vectUp=node.probVectUpRight
+			child=0
+		if verbose:
+			print("probChild")
+			print(probChild)
+	addChild=True
+	#if node is root, try to place as sibling of the current root.
+	#print(node.up)
+	if node.is_root():
+		probOldRoot = findProbRoot(node.probVect)
+		probVectRoot,probRoot = mergeVectorsRoot(node.probVect,bLen,newPartials,bLen,mutMatrix)
+		if verbose:
+			print("parent is root, trying to add new root; node.up, node.probvect, root old prob, new root vect, new root prob")
+			print(node.up)
+			print(node.probVect)
+			print(probOldRoot)
+			print(probVectRoot)
+			print(probRoot)
+		probRoot+= findProbRoot(probVectRoot)
+		if verbose:
+			print(" new root prob after adding root freqs; difference between old root prob and new")
+			print(probRoot)
+			print(probRoot-probOldRoot)
+		if (len(node.children)<1) or (probRoot-probOldRoot>probChild):
+			#CREATE NEW ROOT
+			if verbose:
+				print("Creating new root")
+			newRoot=Tree()
+			newRoot.probVect=probVectRoot
+			#LKtot, probVectTot = finalLKwithVector(probVectRoot,ref,rootFreqsLog,rootFreqs,0.0)
+			probVectTot = rootVector0(probVectRoot,rootFreqs)
+			#probVectTot = rootVector(probVectRoot,rootFreqs,0.0)
+			newRoot.probVectTot=probVectTot
+			#LKUpR, newRoot.probVectUpRight=finalLKwithVector(newPartials,ref,rootFreqsLog,rootFreqs,bLen)
+			#LKUpL, newRoot.probVectUpLeft=finalLKwithVector(node.probVect,ref,rootFreqsLog,rootFreqs,bLen)
+			newRoot.probVectUpRight=rootVector(newPartials,rootFreqs,bLen)
+			newRoot.probVectUpLeft=rootVector(node.probVect,rootFreqs,bLen)
+			newRoot.add_child(child=node,dist=bLen)
+			node.up=newRoot
+			newRoot.add_child(dist=bLen, name=sample)
+			newRoot.children[1].probVect=newPartials
+			newRoot.children[1].probVectTot=mergeVectorsUpDown(newRoot.probVectUpLeft,bLen,newPartials,0.0,mutMatrix)
+			newRoot.children[1].minorSequences=[]
+			newRoot.children[1].up=newRoot
+			if verbose:
+				print("new root added to tree")
+				print(newRoot.probVect)
+				print(newRoot.children[0].probVect)
+				print(newRoot.children[1].probVect)
+			#CALL FUNCTIONS TO UPDATE PROBABILITY VECTORS IN DESCENDANTS
+			updatePartialsFromTop(node,newRoot.probVectUpRight,mutMatrix)
+			addChild=False
+			return newRoot
+		else:
+			if verbose:
+				print("Adding child node")
+			
+	#CREATE NEW INTERNAL NODE AND ADD CHILD INSTEAD
+	if addChild:
+		if len(node.children)==2:
+			newInternalNode=Tree()
+			newInternalNode.add_child(dist=bLen,child=node.children[child])
+			node.children[child].up=newInternalNode
+			newInternalNode.add_child(dist=bLen, name=sample)
+			newInternalNode.children[1].minorSequences=[]
+			newInternalNode.children[1].up=newInternalNode
+			node.children[child]=newInternalNode
+			newInternalNode.up=node
+			newInternalNode.dist=bLen
+			newInternalNode.children[1].probVect=newPartials
+			newInternalNode.probVectUpRight=mergeVectorsUpDown(vectUp,bLen,newPartials,bLen,mutMatrix)
+			newInternalNode.probVectUpLeft=probVectChid
+			newInternalNode.probVect=mergeVectors(newInternalNode.children[0].probVect,bLen,newPartials,bLen,mutMatrix)
+			newInternalNode.probVectTot=mergeVectorsUpDown(newInternalNode.probVectUpLeft,0.0,newPartials,bLen,mutMatrix)
+			newInternalNode.children[1].probVectTot=mergeVectorsUpDown(newInternalNode.probVectUpLeft,bLen,newPartials,0.0,mutMatrix)
+			if verbose:
+				print("new internal node added to tree")
+				print(newInternalNode.probVect)
+				print(newInternalNode.probVectUpRight)
+				print(newInternalNode.probVectUpLeft)
+				print(newInternalNode.probVectTot)
+			#CALL FUNCTIONS TO UPDATE PROBABILITY VECTORS IN DESCENDANTS and ANCESTORS
+			updatePartialsFromTop(newInternalNode.children[0],newInternalNode.probVectUpRight,mutMatrix)
+			updatePartialsFromBottom(node,newInternalNode.probVect,bLen,child,None,mutMatrix)
+		#adding child of leaf
+		else:
+			newInternalNode=Tree()
+			if node.up.children[0]==node:
+				child=0
+				vectUp=node.up.probVectUpRight
+			else:
+				child=1
+				vectUp=node.up.probVectUpLeft
+			node.up.children[child]=newInternalNode
+			newInternalNode.add_child(dist=0.0,child=node)
+			newInternalNode.up=node.up
+			newInternalNode.dist=node.dist
+			node.dist=0.0
+			node.up=newInternalNode
+			newInternalNode.add_child(dist=bLen, name=sample)
+			newInternalNode.children[1].minorSequences=[]
+			newInternalNode.children[1].up=newInternalNode
+			newInternalNode.children[1].probVect=newPartials
+			newInternalNode.probVectUpRight=mergeVectorsUpDown(vectUp,newInternalNode.dist,newPartials,bLen,mutMatrix)
+			newInternalNode.probVectUpLeft=node.probVectTot
+			newInternalNode.probVect=mergeVectors(newInternalNode.children[0].probVect,0.0,newPartials,bLen,mutMatrix)
+			newInternalNode.probVectTot=mergeVectorsUpDown(newInternalNode.probVectUpLeft,0.0,newPartials,bLen,mutMatrix)
+			newInternalNode.children[1].probVectTot=mergeVectorsUpDown(newInternalNode.probVectUpLeft,0.0,newPartials,bLen,mutMatrix)
+			if verbose:
+				print("new internal node added to tree")
+				print(newInternalNode.probVect)
+				print(newInternalNode.probVectUpRight)
+				print(newInternalNode.probVectUpLeft)
+				print(newInternalNode.probVectTot)
+			#CALL FUNCTIONS TO UPDATE PROBABILITY VECTORS IN DESCENDANTS and ANCESTORS
+			updatePartialsFromTop(node,newInternalNode.probVectUpRight,mutMatrix)
+			updatePartialsFromBottom(newInternalNode.up,newInternalNode.probVect,newInternalNode.dist,child,None,mutMatrix)
+		return None
 
+
+
+
+
+
+#IMPROVEMENTS THAT NEED TO BE DONE:
+#1) ALLOW 0-LENGTH BRANCHES?
+#2) TEST EACH FUNCTION ONE AT THE TIME BY PRINTING ITS INPUT OUTPUT ON THE TOTAL RUN
+
+
+stopAt=900
+sampleOfInterest="EPI_ISL_425829"
+sampleOfInterest="EPI_ISL_422130"
 if newPhylogeny:
 	#calculate list of distances from ref
 	start = time.time()
 	print("Creating list of distances from ref")
-	distances=distancesFromRef(data)
+	#distances=distancesFromRef(data)
+	#distances=sortByDate(dates)
+	distances=distancesFromRefPunishNs(data)
 	time2 = time.time() - start
 	#print(distances)
 	print("Distance calculation finished in time "+str(time2))
@@ -1625,13 +2471,11 @@ if newPhylogeny:
 
 	#extract root genome among those closest to the reference but not empty
 	root=distances.pop(0)
-	#for d in range(len(distances)):
-	#	if distances[d][2]>0:
-	#		root=distances.pop(d)
-	#		break
 	print("initial root:")
 	print(root)
 	print(data[root[1]])
+	print("root freqs")
+	print(rootFreqs)
 
 	#we only consider one possible bLen!=0 for now
 	bLen=1.0/lRef
@@ -1640,31 +2484,68 @@ if newPhylogeny:
 	t1=Tree()
 	t1.name=root[1]
 	t1.probVect=probVectTerminalNode(data[root[1]],0.0)
-	#t1.LK=0.0
+	t1.probVectTot=rootVector0(t1.probVect,rootFreqs)
 	t1.minorSequences=[]
-	LKtot, probVectTot = finalLKwithVector(t1.probVect,ref,rootFreqsLog,rootFreqs)
-	#t1.LKup=None
-	#t1.probVectUp=None
-	t1.probVectTot=probVectTot
-	#t1.LKtot=LKtot
-	#print(t1.probVect)
+	#LKtot, probVectTot = finalLKwithVector(t1.probVect,ref,rootFreqsLog,rootFreqs,0.0)
+	#probVectTot = rootVector(t1.probVect,rootFreqs,0.0)
+	#t1.probVectTot=probVectTot
 	numSamples=0
 	for d in distances:
-		sample=d[1]
-		newPartials=probVectTerminalNode(data[sample],0.0)
-		node , bestNewLK=findBestParent(t1,newPartials,sample,bLen,float('-inf'),t1,0)
 		numSamples+=1
-		if (numSamples%100)==0:
-			print("Sample num "+str(numSamples))
+		#if (numSamples%100)==0:
+		print("Sample num "+str(numSamples))
+		sample=d[1]
+		print(sample)
+		newPartials=probVectTerminalNode(data[sample],0.0)
+		print(newPartials)
+		if sample==sampleOfInterest:
+			print("Sample of interest")
+			verbose=True
+			print(t1)
+		node , bestNewLK=findBestParent(t1,newPartials,sample,bLen,float('-inf'),t1,0)
 		if bestNewLK<0.5:
-			placeSampleOnTree(node,newPartials,sample,bestNewLK,bLen)
-
+			print("Major sequence not found, now placing sequence with partials")
+			newRoot=placeSampleOnTree(node,newPartials,sample,bLen)
+			if newRoot!=None:
+				t1=newRoot
+			#print("Root vector:")
+			#print(t1.probVect)
+		if numSamples>stopAt or sample==sampleOfInterest:
+			print("Final tree:")
+			print(t1.write())
+			t1.write(outfile=pathSimu+str(stopAt)+"samplesPhylogeny_iterativeFastLK.tree")
+			print(t1)
+			print(totalMissedMinors[0])
 			exit()
 
 
-	t1.add_child(dist=minBlen)
-	t1.up
+	#t1.up
 	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
