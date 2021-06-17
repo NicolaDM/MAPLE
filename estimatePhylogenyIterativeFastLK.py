@@ -1,9 +1,6 @@
 import sys
-import os
 import math
 import numpy as np
-import random
-from os import path
 import argparse
 from ete3 import Tree
 
@@ -21,6 +18,7 @@ parser.add_argument("--useLogs", help="Calculate logarithms of non-mutation prob
 parser.add_argument("--thresholdProb",help="relative probability threshold used to ignore possible states with very low probabilities.",  type=float, default=0.0000001)
 parser.add_argument("--allowedFails",help="Number of times one can go down the tree without inclreasing placement likelihood before the tree traversal is stopped (only applies to non-0 branch lengths).",  type=int, default=2)
 parser.add_argument("--verbose", help="Print to screen a lot of stuff.", action="store_true")
+parser.add_argument("--useJC", help="Use JC model.", action="store_true")
 args = parser.parse_args()
 
 onlyNambiguities=args.onlyNambiguities
@@ -29,9 +27,10 @@ thresholdProb=args.thresholdProb
 verbose=args.verbose
 pathSimu=args.path
 inputFile=pathSimu+args.input
-outputFile=pathSimu+output
+outputFile=pathSimu+args.output
 refFile=pathSimu+args.reference
 allowedFails=args.allowedFails
+useJC=args.useJC
 
 alleles={"A":0,"C":1,"G":2,"T":3}
 allelesList=["A","C","G","T"]
@@ -70,6 +69,9 @@ def collectReference(fileName):
 
 ref, cumulativeBases, rootFreqs, rootFreqsLog = collectReference(refFile)
 lRef=len(ref)
+if useJC:
+	rootFreqs=[0.25,0.25,0.25,0.25]
+	rootFreqsLog=[math.log(0.25),math.log(0.25),math.log(0.25),math.log(0.25)]
 
 
 
@@ -195,6 +197,8 @@ def probVectTerminalNode(diffs,bLen):
 
 #preliminary nuc mutation rate matrix, from De Maio et al 2021
 mutMatrix=[[0.0,0.039,0.310,0.123],[0.140,0.0,0.022,3.028],[0.747,0.113,0.0,2.953],[0.056,0.261,0.036,0.0]]
+if useJC:
+	mutMatrix=[[0.0,0.333,0.333,0.333],[0.333,0.0,0.333,0.333],[0.333,0.333,0.0,0.333],[0.333,0.333,0.333,0.0]]
 mutMatrix[0][0]=-(mutMatrix[0][1]+mutMatrix[0][2]+mutMatrix[0][3])
 mutMatrix[1][1]=-(mutMatrix[1][0]+mutMatrix[1][2]+mutMatrix[1][3])
 mutMatrix[2][2]=-(mutMatrix[2][0]+mutMatrix[2][1]+mutMatrix[2][3])
@@ -489,19 +493,23 @@ def findBestParent(t1,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses):
 			t1.minorSequences.append(sample)
 			return t1, 1.0
 		elif comparison==2:
-			print("Second sequence is more informative than first, this could be done better, but for now this fact is ignored and the two sequences are not merged.")
-			print(t1.name)
-			print(sample)
-			print(probVect)
-			print(diffs)
+			if verbose:
+				print("Second sequence is more informative than first, this could be done better, but for now this fact is ignored and the two sequences are not merged.")
+				print(t1.name)
+				print(sample)
+				print(probVect)
+				print(diffs)
 			totalMissedMinors[0]+=1
+	
 	if t1.dist>0.000000001:
 		probVect=t1.probVectTot
 		LKdiff=appendProb(probVect,diffs,bLen)
 		if verbose:
 			print("Trying a new parent")
+			if t1.is_leaf():
+				print(t1.name)
 			print(probVect)
-			print(diffs)
+			#print(diffs)
 			print("Failed passes before this step: "+str(failedPasses)+" logLK score: "+str(LKdiff))
 		if LKdiff>bestLKdiff:
 			if verbose:
@@ -513,11 +521,15 @@ def findBestParent(t1,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses):
 			failedPasses+=1
 			if failedPasses>allowedFails:
 				return bestNodeSoFar , bestLKdiff
+
 	for c in t1.children:
 		node, score = findBestParent(c,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses)
+		if score>0.5:
+			return node, score
 		if score>bestLKdiff:
 			bestLKdiff=score
 			bestNodeSoFar=node
+	
 	return bestNodeSoFar , bestLKdiff
 
 
@@ -2003,9 +2015,9 @@ distances=distancesFromRefPunishNs(data)
 print("Distances from the reference calculated")
 #extract root genome among those closest to the reference but not empty
 root=distances.pop(0)
-print("initial root:")
-print(root)
-print(data[root[1]])
+#print("initial root:")
+#print(root)
+#print(data[root[1]])
 
 #default initial length for branches
 bLen=1.0/lRef
@@ -2022,10 +2034,12 @@ for d in distances:
 	numSamples+=1
 	sample=d[1]
 	newPartials=probVectTerminalNode(data[sample],0.0)
-	if (numSamples%100)==0:
+	#print("\n")
+	#print(sample)
+	if (numSamples%500)==0:
 		print("Sample num "+str(numSamples))
-		print(sample)
-		print(newPartials)
+		#print(sample)
+		#print(newPartials)
 	node , bestNewLK=findBestParent(t1,newPartials,sample,bLen,float('-inf'),t1,0)
 	if bestNewLK<0.5:
 		newRoot=placeSampleOnTree(node,newPartials,sample,bLen,bestNewLK)
@@ -2034,12 +2048,19 @@ for d in distances:
 
 print("Tree finalized")
 treeString=(t1.write()).replace(")1:","):")
+totMinors=0
 for s in t1.get_leaves():
-	newString="("+s.name+":0.0"
-	for s2 in s.minorSequences:
-		newString+=","+s2+":0.0"
-	newString+=")"
-	treeString=treeString.replace(s.name,newString)
+	if len(s.minorSequences)>0:
+		totMinors+=len(s.minorSequences)
+		newString="("+s.name+":0"
+		for s2 in s.minorSequences:
+			newString+=","+s2+":0"
+		newString+="):"
+		treeString=treeString.replace(s.name+":",newString)
+print("leaves in tree: ")
+print(len(t1.get_leaves()))
+print("tot minors:")
+print(totMinors)
 		
 #print(treeString)
 file=open(outputFile,"w")
