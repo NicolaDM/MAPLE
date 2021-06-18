@@ -2057,10 +2057,10 @@ for s in t1.get_leaves():
 			newString+=","+s2+":0"
 		newString+="):"
 		treeString=treeString.replace(s.name+":",newString)
-print("leaves in tree: ")
-print(len(t1.get_leaves()))
-print("tot minors:")
-print(totMinors)
+#print("leaves in tree: ")
+#print(len(t1.get_leaves()))
+#print("tot minors:")
+#print(totMinors)
 		
 #print(treeString)
 file=open(outputFile,"w")
@@ -2068,6 +2068,9 @@ file.write(treeString)
 file.close()
 print("Missed minor samples: "+str(totalMissedMinors[0]))
 exit()
+
+#1)ALLOW SAMPLE PLACEMENT IN THE MIDDLE OF LONG BRANCHES.
+#2)ESTIMATE SUBSTITUTION MODEL ON THE GO.
 
 
 #estimate susbstitution rates?
