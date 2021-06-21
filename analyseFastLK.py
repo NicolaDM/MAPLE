@@ -3595,13 +3595,7 @@ if subsampleTreeInference>0:
 			# print("\n")
 
 			# print("Starting IQtree2 GTR with fastFelsenstein initial tree")
-			# start = time.time()
 			# os.system("cd "+pathSimu+" ; /Applications/iqtree-2.1.3-MacOSX/bin/iqtree2 -s "+phylipFile+" -st DNA -pre "+IQtreeName+"_GTRfastLK -t "+fastLKtreeName+" -m GTR -quiet -redo -nt 1 -blmin 0.000000005 ")
-			# timesIQtree2GTRfastLK.append(time.time() - start)
-			# print("Time taken by IQtree2 with GTR with fastFelsenstein initial tree "+str(timesIQtree2GTRfastLK[-1]))
-			# lksIQtree2GTRfastLK.append(assessLKwithIQtree(pathSimu+IQtreeName+"_GTRfastLK.treefile",pathSimu,phylipFile,IQtreeName+"_GTRfastLK"))
-			# print(lksIQtree2GTRfastLK[-1])
-			# print("\n")
 
 			#print("Starting IQtree2 GTR short branches")
 			#os.system("cd "+pathSimu+" ; /Applications/iqtree-2.1.3-MacOSX/bin/iqtree2 -s "+phylipFile+" -st DNA -pre "+IQtreeName+"_GTR -m GTR -quiet -redo -nt 1 -blmin 0.000000005 ")
@@ -3616,13 +3610,7 @@ if subsampleTreeInference>0:
 			print("\n")
 
 			# print("Starting IQtree2 GTR fast with fastFelsenstein initial tree")
-			# start = time.time()
 			# os.system("cd "+pathSimu+" ; /Applications/iqtree-2.1.3-MacOSX/bin/iqtree2 -s "+phylipFile+" -st DNA -pre "+IQtreeName+"_GTRfastfastLK -t "+fastLKtreeName+" -m GTR -quiet -redo -nt 1 -fast -blmin 0.000000005 ")
-			# timesIQtree2GTRfastfastLK.append(time.time() - start)
-			# print("Time taken by IQtree2 with GTR fast with fastFelsenstein initial tree "+str(timesIQtree2GTRfastfastLK[-1]))
-			# lksIQtree2GTRfastfastLK.append(assessLKwithIQtree(pathSimu+IQtreeName+"_GTRfastfastLK.treefile",pathSimu,phylipFile,IQtreeName+"_GTRfastfastLK"))
-			# print(lksIQtree2GTRfastfastLK[-1])
-			# print("\n")
 
 			# print("Starting IQtree2 GTR slow")
 			# start = time.time()
@@ -3634,13 +3622,7 @@ if subsampleTreeInference>0:
 			# print("\n")
 
 			# print("Starting IQtree2 GTR slow with fastFelsenstein initial tree")
-			# start = time.time()
 			# os.system("cd "+pathSimu+" ; /Applications/iqtree-2.1.3-MacOSX/bin/iqtree2 -s "+phylipFile+" -st DNA -pre "+IQtreeName+"_GTRslowfastLK -t "+fastLKtreeName+" -m GTR -quiet -redo -nt 1 -pers 0.1 -nstop 500 -blmin 0.000000005 ")
-			# timesIQtree2GTRslowfastLK.append(time.time() - start)
-			# print("Time taken by IQtree2 with GTR slow with fastFelsenstein initial tree "+str(timesIQtree2GTRslowfastLK[-1]))
-			# lksIQtree2GTRslowfastLK.append(assessLKwithIQtree(pathSimu+IQtreeName+"_GTRslowfastLK.treefile",pathSimu,phylipFile,IQtreeName+"_GTRslowfastLK"))
-			# print(lksIQtree2GTRslowfastLK[-1])
-			# print("\n")
 
 
 			# print("Starting IQtree UNREST")
@@ -3670,13 +3652,7 @@ if subsampleTreeInference>0:
 			print("\n")
 
 			# print("Starting fasttree GTR with fastFelsenstein initial tree")
-			# start = time.time()
 			# os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -gtr -intree "+fastLKtreeName+" -nocat < "+fastaFile+" > "+pathSimu+fasttreeName+"_GTRfastLK.tree")
-			# timesFastTreeGTRfastLK.append(time.time() - start)
-			# print("Time taken by fastTree with GTR with fastFelsenstein initial tree "+str(timesFastTreeGTRfastLK[-1]))
-			# lksFastTreeGTRfastLK.append(assessLKwithIQtree(pathSimu+fasttreeName+"_GTRfastLK.tree",pathSimu,phylipFile,fasttreeName+"_GTRfastLK"))
-			# print(lksFastTreeGTRfastLK[-1])
-			# print("\n")
 
 			#print("Starting fasttree GTR fast")
 			#os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -gtr -nocat -fastest < "+fastaFile+" > "+pathSimu+fasttreeName+"_GTR.tree")
@@ -3684,23 +3660,17 @@ if subsampleTreeInference>0:
 			#print("Starting fasttree GTR slow")
 			#os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -gtr -nocat -spr 4  < "+fastaFile+" > "+pathSimu+fasttreeName+"_GTR.tree")
 
-			print("Starting fasttree GTR slowest")
-			start = time.time()
-			os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -gtr -nocat -spr 4 -mlacc 2 -slownni < "+fastaFile+" > "+pathSimu+fasttreeName+"_GTRslowest.tree")
-			timesFastTreeGTRslowest.append(time.time() - start)
-			print("Time taken by fastTree slowest with GTR "+str(timesFastTreeGTRslowest[-1]))
-			lksFastTreeGTRslowest.append(assessLKwithIQtree(pathSimu+fasttreeName+"_GTRslowest.tree",pathSimu,phylipFile,fasttreeName+"_GTRslowest"))
-			print(lksFastTreeGTRslowest[-1])
-			print("\n")
+			# print("Starting fasttree GTR slowest")
+			# start = time.time()
+			# os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -gtr -nocat -spr 4 -mlacc 2 -slownni < "+fastaFile+" > "+pathSimu+fasttreeName+"_GTRslowest.tree")
+			# timesFastTreeGTRslowest.append(time.time() - start)
+			# print("Time taken by fastTree slowest with GTR "+str(timesFastTreeGTRslowest[-1]))
+			# lksFastTreeGTRslowest.append(assessLKwithIQtree(pathSimu+fasttreeName+"_GTRslowest.tree",pathSimu,phylipFile,fasttreeName+"_GTRslowest"))
+			# print(lksFastTreeGTRslowest[-1])
+			# print("\n")
 
 			# print("Starting fasttree GTR slowest with fastFelsenstein initial tree")
-			# start = time.time()
 			# os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -gtr -intree "+fastLKtreeName+" -nocat < "+fastaFile+" > "+pathSimu+fasttreeName+"_GTRslowestfastLK.tree")
-			# timesFastTreeGTRslowestfastLK.append(time.time() - start)
-			# print("Time taken by fastTree slowest with GTR with fastFelsenstein initial tree "+str(timesFastTreeGTRslowestfastLK[-1]))
-			# lksFastTreeGTRslowestfastLK.append(assessLKwithIQtree(pathSimu+fasttreeName+"_GTRslowestfastLK.tree",pathSimu,phylipFile,fasttreeName+"_GTRslowestfastLK"))
-			# print(lksFastTreeGTRslowestfastLK[-1])
-			# print("\n")
 
 
 
