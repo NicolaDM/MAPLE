@@ -3482,6 +3482,9 @@ def assessLKwithIQtree(treeFile,folder,phylipFile,runName):
 
 if subsampleTreeInference>0:
 	refName=pathSimu+"EPI_ISL_402124_lowercase.fasta"
+	#if debug:	
+	debugFileName=pathSimu+"lkFile_debug_"+str(subsampleTreeInference)+".txt"
+	debugFile=open(debugFileName,"w")
 	#timesFastLKJC=[]
 	timesFastLK=[]
 	#timesIQtreeJC=[]
@@ -3526,7 +3529,10 @@ if subsampleTreeInference>0:
 		newSamples=random.sample(samples,subsampleTreeInference)
 
 		subsample=len(newSamples)
-		diffFile="diffFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.txt"
+		if debug:
+			diffFile="diffFile_debug_"+str(subsampleTreeInference)+"samples.txt"
+		else:
+			diffFile="diffFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.txt"
 		fileO=open(pathSimu+diffFile,"w")
 		for s in newSamples:
 			fileO.write(">"+s+"\n")
@@ -3537,8 +3543,12 @@ if subsampleTreeInference>0:
 						fileO.write(m[0]+"\t"+str(m[1])+"\t"+str(m[2])+"\n")
 		fileO.close()
 		
-		phylipFile=pathSimu+"phylipFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.phy"
-		fastaFile=pathSimu+"fastaFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.fa"
+		if debug:
+			phylipFile=pathSimu+"phylipFile_debug_"+str(subsampleTreeInference)+"samples.phy"
+			fastaFile=pathSimu+"fastaFile_debug_"+str(subsampleTreeInference)+"samples.fa"
+		else:
+			phylipFile=pathSimu+"phylipFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.phy"
+			fastaFile=pathSimu+"fastaFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.fa"
 		fileFa=open(fastaFile,"w")
 		fileO=open(phylipFile,"w")
 		lRef=len(ref)
@@ -3561,14 +3571,22 @@ if subsampleTreeInference>0:
 
 		#Run fast likelihood
 		print("Starting new Felsenstein iterative placement repeat "+str(repeat)+" with "+str(subsample)+" random samples ")
-		fastLKtreeName="fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.tree"
+		if debug:
+			fastLKtreeName="fastLKtree_debug_"+str(subsampleTreeInference)+"samples.tree"
+		else:
+			fastLKtreeName="fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.tree"
 		start = time.time()
 		os.system("python3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/estimatePhylogenyIterativeFastLK.py --path "+pathSimu+" --input "+diffFile+" --output "+fastLKtreeName)
 		timesFastLK.append(time.time() - start)
 		print("Time for fastLK: "+str(timesFastLK[-1]))
-		lksFastLK.append(assessLKwithIQtree(fastLKtreeName,pathSimu,phylipFile,"fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples"))
+		if debug:
+			lksFastLK.append(assessLKwithIQtree(fastLKtreeName,pathSimu,phylipFile,"fastLKtree_debug_"+str(subsampleTreeInference)+"samples"))
+		else:
+			lksFastLK.append(assessLKwithIQtree(fastLKtreeName,pathSimu,phylipFile,"fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples"))
 		print(lksFastLK[-1])
 		print("\n")
+		baseLK=lksFastLK[-1][0]
+		debugFile.write("fastLK repeat "+str(repeat+1)+" lk: "+str(baseLK)+"\n")
 
 		# fastLKJCtreeName="fastLKtreeJC_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.tree"
 		# os.system("python3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/estimatePhylogenyIterativeFastLK.py --path "+pathSimu+" --useJC --input "+diffFile+" --output "+fastLKJCtreeName)
@@ -3577,7 +3595,10 @@ if subsampleTreeInference>0:
 		runIQtree=True
 		if runIQtree:
 
-			IQtreeName="IQtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples"
+			if debug:
+				IQtreeName="IQtree_debug_"+str(subsampleTreeInference)+"samples"
+			else:
+				IQtreeName="IQtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples"
 
 			# print("Starting IQtree JC")
 			# os.system("cd "+pathSimu+" ; /Applications/iqtree-1.6.12-MacOSX/bin/iqtree -s "+phylipFile+" -st DNA -pre "+IQtreeName+"_JC -m JC -quiet -redo -nt 1 ")
@@ -3608,6 +3629,15 @@ if subsampleTreeInference>0:
 			lksIQtree2GTRfast.append(assessLKwithIQtree(pathSimu+IQtreeName+"_GTRfast.treefile",pathSimu,phylipFile,IQtreeName+"_GTRfast"))
 			print(lksIQtree2GTRfast[-1])
 			print("\n")
+			iqLK=lksIQtree2GTRfast[-1][0]
+			debugFile.write("IQtree fast repeat "+str(repeat+1)+" lk: "+str(iqLK)+"\n")
+			if debug:
+				if iqLK>baseLK+6.0:
+					print("significant difference in LK between fastLK and iqtree, seed "+str(seed+repeat))
+					exit()
+				if baseLK>iqLK+6.0:
+					print("significant difference in LK between fastLK and iqtree, with fastLK being better, seed "+str(seed+repeat))
+					exit()
 
 			# print("Starting IQtree2 GTR fast with fastFelsenstein initial tree")
 			# os.system("cd "+pathSimu+" ; /Applications/iqtree-2.1.3-MacOSX/bin/iqtree2 -s "+phylipFile+" -st DNA -pre "+IQtreeName+"_GTRfastfastLK -t "+fastLKtreeName+" -m GTR -quiet -redo -nt 1 -fast -blmin 0.000000005 ")
@@ -3634,10 +3664,13 @@ if subsampleTreeInference>0:
 			#print("Starting IQtree, estimate bLengths")
 			#os.system("/Applications/iqtree-1.6.12-MacOSX/bin/iqtree -s "+pathSimu+"2021-03-31_"+string+".phylip -st DNA -te "+pathSimu+"2021-03-31_"+string+".tree -pre "+string+"_iqtree1_bLen -nt 1 -keep-ident -m GTR\{0.04,0.3,0.1,0.02,1.0,1.0\}+FQ -quiet -redo ")
 
-		runFastTree=True
+		runFastTree=False
 		if runFastTree:
 
-			fasttreeName="fastTree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples"
+			if debug:
+				fasttreeName="fastTree_debug_"+str(subsampleTreeInference)+"samples"
+			else:
+				fasttreeName="fastTree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples"
 
 			# print("Starting fasttree JC")
 			# os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -nocat < "+fastaFile+" > "+pathSimu+fasttreeName+"_JC.tree")
@@ -3650,6 +3683,12 @@ if subsampleTreeInference>0:
 			lksFastTreeGTR.append(assessLKwithIQtree(pathSimu+fasttreeName+"_GTR.tree",pathSimu,phylipFile,fasttreeName+"_GTR"))
 			print(lksFastTreeGTR[-1])
 			print("\n")
+			fastTreeLK=lksFastTreeGTR[-1][0]
+			#if debug:
+			debugFile.write("fastTree repeat "+str(repeat+1)+" lk: "+str(fastTreeLK)+"\n")
+			#if fastTreeLK>baseLK+0.5:
+			#	print("significant difference in LK between fastLK and fastTree, seed "+str(seed+repeat))
+			#	exit()
 
 			# print("Starting fasttree GTR with fastFelsenstein initial tree")
 			# os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -gtr -intree "+fastLKtreeName+" -nocat < "+fastaFile+" > "+pathSimu+fasttreeName+"_GTRfastLK.tree")

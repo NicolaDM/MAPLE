@@ -18,8 +18,10 @@ parser.add_argument("--useLogs", help="Calculate logarithms of non-mutation prob
 parser.add_argument("--thresholdProb",help="relative probability threshold used to ignore possible states with very low probabilities.",  type=float, default=0.0000001)
 parser.add_argument("--allowedFails",help="Number of times one can go down the tree without inclreasing placement likelihood before the tree traversal is stopped (only applies to non-0 branch lengths).",  type=int, default=2)
 parser.add_argument("--verbose", help="Print to screen a lot of stuff.", action="store_true")
-parser.add_argument("--useJC", help="Use JC model.", action="store_true")
+parser.add_argument("--model", help="Which substitution model should be used. Allowed models so far are JC, GTR (default) or UNREST.", default="GTR")
 args = parser.parse_args()
+
+bLenAdjustment=10.0
 
 onlyNambiguities=args.onlyNambiguities
 useLogs=args.useLogs
@@ -30,7 +32,9 @@ inputFile=pathSimu+args.input
 outputFile=pathSimu+args.output
 refFile=pathSimu+args.reference
 allowedFails=args.allowedFails
-useJC=args.useJC
+model=args.model
+
+example=False
 
 alleles={"A":0,"C":1,"G":2,"T":3}
 allelesList=["A","C","G","T"]
@@ -47,7 +51,7 @@ def collectReference(fileName):
 		line=file.readline()
 		ref+=line.replace("\n","")
 	lRef=len(ref)
-	print("Ref genome length: "+str(lRef))
+	#print("Ref genome length: "+str(lRef))
 	file.close()
 	#vector to count how many bases of each type are cumulatively in the reference genome up to a certain position
 	cumulativeBases=np.zeros((lRef+1,4))
@@ -55,24 +59,37 @@ def collectReference(fileName):
 		for k in range(4):
 			cumulativeBases[i+1][k]=cumulativeBases[i][k]
 		cumulativeBases[i+1][allelesLow[ref[i]]]+=1
-	print("cumulativeBases")
-	print(cumulativeBases[-1])
+	#print("cumulativeBases")
+	#print(cumulativeBases[-1])
 	rootFreqs=np.zeros(4)
 	rootFreqsLog=np.zeros(4)
 	for i in range(4):
 		rootFreqs[i]=cumulativeBases[-1][i]/float(lRef)
 		rootFreqsLog[i]=math.log(rootFreqs[i])
-	print("ref base frequencies and log")
-	print(rootFreqs)
-	print(rootFreqsLog)
+	#print("ref base frequencies and log")
+	#print(rootFreqs)
+	#print(rootFreqsLog)
 	return ref, cumulativeBases, rootFreqs, rootFreqsLog
 
 ref, cumulativeBases, rootFreqs, rootFreqsLog = collectReference(refFile)
 lRef=len(ref)
-if useJC:
+if model=="JC":
 	rootFreqs=[0.25,0.25,0.25,0.25]
 	rootFreqsLog=[math.log(0.25),math.log(0.25),math.log(0.25),math.log(0.25)]
 
+if example:
+	ref="aaccggtt"
+	lRef=len(ref)
+	rootFreqs=[0.25,0.25,0.25,0.25]
+	rootFreqsLog=[math.log(0.25),math.log(0.25),math.log(0.25),math.log(0.25)]
+	cumulativeBases=np.zeros((lRef+1,4))
+	for i in range(lRef):
+		for k in range(4):
+			cumulativeBases[i+1][k]=cumulativeBases[i][k]
+		cumulativeBases[i+1][allelesLow[ref[i]]]+=1
+
+#TO DO
+#recreate a simple scenario of a recombinant sample and with just a few samples and small genome, and see if there is still a bias in placing at the root, and why that is.
 
 
 
@@ -105,6 +122,12 @@ def readConciseAlignment(fileName):
 #read sequence data from file
 data=readConciseAlignment(inputFile)
 
+if example:
+	data={}
+	data["sampleCG"]=[]
+	data["sampleTG"]=[("t",3)]
+	data["sampleCT"]=[("t",5)]
+	data["sampleTT"]=[("t",3),("t",5)]
 
 samples=data.keys()
 print(str(len(samples))+" sequences in the concise DNA data file")
@@ -195,14 +218,37 @@ def probVectTerminalNode(diffs,bLen):
 		probVect.append(["R",pos,lRef+1-pos,bLen,False])
 	return probVect
 
+def updateSubMatrix(pseudoMutCounts,model):
+	mutMatrix=np.zeros((4,4))
+	if model=="UNREST":
+		for i in range4:
+			for j in range4:
+				mutMatrix[i][j]=pseudoMutCounts[i][j]/rootFreqs[i]
+	elif model=="GTR":
+		for i in range4:
+			for j in range4:
+				mutMatrix[i][j]=(pseudoMutCounts[i][j]+pseudoMutCounts[j][i])/rootFreqs[i]
+	else:
+		print("Substitution model not recognised! Exiting")
+		exit()
+	mutMatrix[0][0]=-(mutMatrix[0][1]+mutMatrix[0][2]+mutMatrix[0][3])
+	mutMatrix[1][1]=-(mutMatrix[1][0]+mutMatrix[1][2]+mutMatrix[1][3])
+	mutMatrix[2][2]=-(mutMatrix[2][0]+mutMatrix[2][1]+mutMatrix[2][3])
+	mutMatrix[3][3]=-(mutMatrix[3][0]+mutMatrix[3][1]+mutMatrix[3][2])
+	totRate=-(rootFreqs[0]*mutMatrix[0][0]+ rootFreqs[1]*mutMatrix[1][1]+ rootFreqs[2]*mutMatrix[2][2]+ rootFreqs[3]*mutMatrix[3][3] )
+	for i in range4:
+		for j in range4:
+			mutMatrix[i][j]=mutMatrix[i][j]/totRate
+	return mutMatrix
+
 #preliminary nuc mutation rate matrix, from De Maio et al 2021
 mutMatrix=[[0.0,0.039,0.310,0.123],[0.140,0.0,0.022,3.028],[0.747,0.113,0.0,2.953],[0.056,0.261,0.036,0.0]]
-if useJC:
+if model=="JC":
 	mutMatrix=[[0.0,0.333,0.333,0.333],[0.333,0.0,0.333,0.333],[0.333,0.333,0.0,0.333],[0.333,0.333,0.333,0.0]]
-mutMatrix[0][0]=-(mutMatrix[0][1]+mutMatrix[0][2]+mutMatrix[0][3])
-mutMatrix[1][1]=-(mutMatrix[1][0]+mutMatrix[1][2]+mutMatrix[1][3])
-mutMatrix[2][2]=-(mutMatrix[2][0]+mutMatrix[2][1]+mutMatrix[2][3])
-mutMatrix[3][3]=-(mutMatrix[3][0]+mutMatrix[3][1]+mutMatrix[3][2])
+else:
+	pseudoMutCounts=[[0.0,1.0,5.0,2.0],[2.0,0.0,1.0,40.0],[5.0,2.0,0.0,20.0],[2.0,3.0,1.0,0.0]]
+	mutMatrix=updateSubMatrix(pseudoMutCounts,model)
+
 
 
 #Sort samples based on distance from reference, but punishing more isolated N's and ambiguity codes.
@@ -335,7 +381,233 @@ def isMinorSequence(probVect1,probVect2):
 
 
 #function to calculate likelihood cost of appending child to parent
-def appendProb(probVectP,probVectC,bLen):
+def appendProb(probVectP,probVectC,bLen,mutMatrix):
+	Lkcost=0.0
+	#LkcostOriginal=0.0
+	indexEntry1=0
+	indexEntry2=0
+	pos=1
+	entry1=probVectP[indexEntry1]
+	pos1=entry1[1]
+	if entry1[0]!="N" and entry1[0]!="R":
+		end1=pos1
+	else:
+		end1=pos1+entry1[2]-1
+	entry2=probVectC[indexEntry2]
+	pos2=entry2[1]
+	if entry2[0]!="N" and entry2[0]!="R":
+		end2=pos2
+	else:
+		end2=pos2+entry2[2]-1
+	end=end1
+	if end2<end:
+		end=end2
+	length=end+1-pos
+	while True:
+		if entry1[0]=="N":
+			if not entry1[4]:
+				print("Warning, should have been True")
+			if entry2[0]=="N":
+				pass
+			elif entry2[0]=="R":
+				for i in range4:
+					Lkcost+=rootFreqsLog[i]*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
+			elif entry2[0]=="O":
+				tot=0.0
+				for i in range4:
+					tot+=rootFreqs[i]*entry2[4][i]
+				Lkcost+=math.log(tot)
+			else:
+				i2=alleles[entry2[0]]
+				Lkcost+=rootFreqsLog[i2]
+		elif entry2[0]=="N":
+			pass
+		elif entry1[0]=="R":
+			if entry2[0]=="R":
+				if entry1[4]:
+					for i in range4:
+						Lkcost+=mutMatrix[i][i]*(bLen+entry1[3]+entry1[5])*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
+				else:
+					for i in range4:
+						Lkcost+=mutMatrix[i][i]*(bLen+entry1[3])*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
+			elif entry2[0]=="O":
+				i1=allelesLow[ref[pos-1]]
+				tot=0.0
+				if entry1[4]:
+					for i in range4:
+						if i1==i:
+							tot2=rootFreqs[i]*(1.0+mutMatrix[i][i1]*entry1[3])
+						else:
+							tot2=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]
+						tot3=0.0
+						for j in range4:
+							if i!=j:
+								tot3+=mutMatrix[i][j]*(bLen+entry1[5])*entry2[4][j]
+							else:
+								tot3+=(1.0+mutMatrix[i][j]*(bLen+entry1[5]))*entry2[4][j]
+						tot2=tot2*tot3
+						tot+=tot2
+					if tot>sys.float_info.min:
+						Lkcost+=math.log(tot/rootFreqs[i1])
+					else:
+						return float("-inf")
+				else:
+					for j in range4:
+						if i1!=j:
+							tot+=mutMatrix[i1][j]*(bLen+entry1[3])*entry2[4][j]
+						else:
+							tot+=(1.0+mutMatrix[i1][j]*(bLen+entry1[3]))*entry2[4][j]
+					if tot>sys.float_info.min:
+						Lkcost+=math.log(tot)
+					else:
+						return float("-inf")
+			else:
+				if entry1[4]:
+					if (bLen+entry1[3]+entry1[5])<thresholdProb2:
+						return float("-inf")
+					i2=alleles[entry2[0]]
+					i1=allelesLow[ref[pos-1]]
+					tot=0.0
+					for i in range4:
+						if i1==i:
+							tot+=rootFreqs[i]*(1.0+mutMatrix[i][i1]*entry1[3])*mutMatrix[i][i2]*(entry1[5]+bLen)
+						elif i2==i:
+							tot+=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]*(1.0+mutMatrix[i][i2]*(entry1[5]+bLen))
+						else:
+							tot+=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]*mutMatrix[i][i2]*(entry1[5]+bLen)
+					Lkcost+=math.log(tot/rootFreqs[i1])
+				else:
+					if (bLen+entry1[3])<thresholdProb2:
+						return float("-inf")
+					i2=alleles[entry2[0]]
+					i1=allelesLow[ref[pos-1]]
+					Lkcost+=math.log(mutMatrix[i1][i2]*(bLen+entry1[3]))
+		elif entry1[0]=="O":
+			tot1=0.0
+			for i in range4:
+				tot1+=entry1[4][i]
+			#LkcostOriginal+=math.log(tot1)
+			if entry2[0]=="O":
+				tot=0.0
+				for i in range4:
+					for j in range4:
+						if i==j:
+							tot+=(1.0+mutMatrix[i][i]*(bLen+entry1[3]))*entry1[4][i]*entry2[4][j]
+						else:
+							tot+=mutMatrix[i][j]*(bLen+entry1[3])*entry1[4][i]*entry2[4][j]
+				if tot>sys.float_info.min:
+					Lkcost+=math.log(tot/tot1)
+				else:
+					return float("-inf")
+			else:
+				if entry2[0]=="R":
+					i2=allelesLow[ref[pos-1]]
+				else:
+					i2=alleles[entry2[0]]
+				tot=0.0
+				for i in range4:
+					if i==i2:
+						tot+=entry1[4][i]*(1.0+mutMatrix[i][i]*(bLen+entry1[3]))
+					else:
+						tot+=entry1[4][i]*mutMatrix[i][i2]*(bLen+entry1[3])
+				if tot>sys.float_info.min:
+					Lkcost+=math.log(tot/tot1)
+				else:
+					return float("-inf")
+		#entry1 is a non-ref nuc
+		else:
+			i1=alleles[entry1[0]]
+			if entry2[0]==entry1[0]:
+				if entry1[4]:
+					Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3]+entry1[5])
+				else:
+					Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3])
+			else:
+				if entry2[0]=="O":
+					tot=0.0
+					if entry1[4]:
+						for i in range4:
+							if i1==i:
+								tot2=rootFreqs[i]*(1.0+mutMatrix[i][i1]*entry1[3])
+							else:
+								tot2=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]
+							tot3=0.0
+							for j in range4:
+								if i!=j:
+									tot3+=mutMatrix[i][j]*(bLen+entry1[5])*entry2[4][j]
+								else:
+									tot3+=(1.0+mutMatrix[i][j]*(bLen+entry1[5]))*entry2[4][j]
+							tot2=tot2*tot3
+							tot+=tot2
+						if tot>sys.float_info.min:
+							Lkcost+=math.log(tot/rootFreqs[i1])
+						else:
+							return float("-inf")
+					else:
+						for j in range4:
+							if i1==j:
+								tot+=(1.0+mutMatrix[i1][i1]*(bLen+entry1[3]))*entry2[4][j]
+							else:
+								tot+=mutMatrix[i1][j]*(bLen+entry1[3])*entry2[4][j]
+						if tot>sys.float_info.min:
+							Lkcost+=math.log(tot)
+						else:
+							return float("-inf")
+
+				else:
+					if entry1[4]:
+						if (bLen+entry1[3]+entry1[5])<thresholdProb2:
+							return float("-inf")
+						if entry2[0]=="R":
+							i2=allelesLow[ref[pos-1]]
+						else:
+							i2=alleles[entry2[0]]
+						tot=0.0
+						for i in range4:
+							if i1==i:
+								tot+=rootFreqs[i]*(1.0+mutMatrix[i][i1]*entry1[3])*mutMatrix[i][i2]*(entry1[5]+bLen)
+							elif i2==i:
+								tot+=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]*(1.0+mutMatrix[i][i2]*(entry1[5]+bLen))
+							else:
+								tot+=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]*mutMatrix[i][i2]*(entry1[5]+bLen)
+						Lkcost+=math.log(tot/rootFreqs[i1])
+					else:
+						if (bLen+entry1[3])<thresholdProb2:
+							return float("-inf")
+						if entry2[0]=="R":
+							i2=allelesLow[ref[pos-1]]
+						else:
+							i2=alleles[entry2[0]]
+						Lkcost+=math.log(mutMatrix[i1][i2]*(bLen+entry1[3]))
+
+		pos+=length
+		if pos>lRef:
+			break
+		if pos>end1:
+			indexEntry1+=1
+			entry1=probVectP[indexEntry1]
+			pos1=entry1[1]
+			if entry1[0]!="N" and entry1[0]!="R":
+				end1=pos1
+			else:
+				end1=pos1+entry1[2]-1
+		if pos>end2:
+			indexEntry2+=1
+			entry2=probVectC[indexEntry2]
+			pos2=entry2[1]
+			if entry2[0]!="N" and entry2[0]!="R":
+				end2=pos2
+			else:
+				end2=pos2+entry2[2]-1
+		end=end1
+		if end2<end:
+			end=end2
+		length=end+1-pos
+	return Lkcost 
+	#-LkcostOriginal
+
+#function to calculate likelihood cost of appending child to parent
+def appendProbOld(probVectP,probVectC,bLen,mutMatrix):
 	Lkcost=0.0
 	LkcostOriginal=0.0
 	indexEntry1=0
@@ -485,63 +757,155 @@ def appendProb(probVectP,probVectC,bLen):
 #number of samples that could have been placed as major of another sample, but weren't due to sample placement order
 totalMissedMinors=[0]
 #function to find the best node in the tree where to append the new sample, based on the node's tot posterior state probabilities.
-def findBestParent(t1,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses,bestIsMidNode):
+def findBestParent(t1,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses,bestIsMidNode,bestUpLK,bestDownLK,bestDownNode,parentLK,mutMatrix,adjustBLen):
+	# print("findBestParent(), Node")
+	# print(t1)
+	# print("With probVectTot: ")
+	# print(t1.probVectTot)
 	if t1.is_leaf():
 		probVect=t1.probVect
 		comparison=isMinorSequence(probVect,diffs)
 		if comparison==1:
 			t1.minorSequences.append(sample)
-			return t1, 1.0, False
+			return t1, 1.0, False, float("-inf"), float("-inf"), None, float("-inf"), None, False
 		elif comparison==2:
 			if verbose:
-				print("Second sequence is more informative than first, this could be done better, but for now this fact is ignored and the two sequences are not merged.")
+				print("Second sequence is more informative than first, but for now the two sequences are not merged.")
 				print(t1.name)
 				print(sample)
-				print(probVect)
-				print(diffs)
+				#print(probVect)
+				#print(diffs)
 			totalMissedMinors[0]+=1
 	
 	if t1.dist>thresholdProb2 and t1.up!=None:
+		probVect2=t1.probVectTotUp
+		LKdiff2=appendProb(probVect2,diffs,bLen,mutMatrix)
+		newLKdiff2=appendProb(probVect2,diffs,bLen*bLenAdjustment,mutMatrix)
+		if newLKdiff2>LKdiff2:
+			LKdiff2=newLKdiff2
+			adjusted=True
+		else:
+			adjusted=False
+		if LKdiff2>bestLKdiff:
+			adjustBLen=adjusted
+			bestLKdiff=LKdiff2
+			bestNodeSoFar=t1
+			failedPasses=0
+			bestIsMidNode=True
+	else:
+		LKdiff2=float("-inf")
+
+	if t1.dist>thresholdProb2:
 		probVect=t1.probVectTot
-		LKdiff=appendProb(probVect,diffs,bLen)
-		isMidNode=False
+		LKdiff=appendProb(probVect,diffs,bLen,mutMatrix)
 		if verbose:
 			print("Trying a new parent")
 			if t1.is_leaf():
 				print(t1.name)
 			print(probVect)
-			#print(diffs)
 			print("Failed passes before this step: "+str(failedPasses)+" logLK score: "+str(LKdiff))
-		#print(t1.write())
-		#print(t1.dist)
-		probVect2=t1.probVectTotUp
-		LKdiff2=appendProb(probVect2,diffs,bLen)
-		if LKdiff2>LKdiff:
-			LKdiff=LKdiff2
-			probVect=probVect2
-			isMidNode=True
+		newLKdiff=appendProb(probVect,diffs,bLen*bLenAdjustment,mutMatrix)
+		if newLKdiff>LKdiff:
+			LKdiff=newLKdiff
+			adjusted=True
+		else:
+			adjusted=False
 		if LKdiff>bestLKdiff:
-			if verbose:
-				print("New best LK")
+			adjustBLen=adjusted
 			bestLKdiff=LKdiff
 			bestNodeSoFar=t1
 			failedPasses=0
-			bestIsMidNode=isMidNode
+			bestIsMidNode=False
+			bestUpLK=LKdiff2
+		elif LKdiff2>=bestLKdiff-thresholdProb2:
+			bestUpLK=parentLK
+			bestDownLK=LKdiff
+			bestDownNode=t1
 		elif LKdiff<bestLKdiff-0.1:
 			failedPasses+=1
 			if failedPasses>allowedFails:
-				return bestNodeSoFar , bestLKdiff , bestIsMidNode
+				return bestNodeSoFar , bestLKdiff , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, LKdiff2, t1, adjustBLen
+	else:
+		LKdiff=float("-inf")
+	# print("t1.dist "+str(t1.dist))
+	# print("LKdiff "+str(LKdiff))
+	# print("LKdiff2 "+str(LKdiff2))
+	
 
+	bestOfChildLK=float("-inf")
+	bestChild=None
+	# print("Before child loop, best child")
+	# print(bestChild)
+	# print(bestOfChildLK)
 	for c in t1.children:
-		node, score , childIsMidNode = findBestParent(c,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses,bestIsMidNode)
+		node, score , childIsMidNode, childUpLK, childDownLK, childBestDownNode, currentBestChildLK, currentBestChild , adjustBLenChild = findBestParent(c,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses,bestIsMidNode,bestUpLK,bestDownLK,bestDownNode,LKdiff,mutMatrix,adjustBLen)
 		if score>0.5:
-			return node, score , False
+			return node, score , False, float("-inf"), float("-inf"), None, float("-inf"), None, False
 		if score>bestLKdiff:
 			bestLKdiff=score
 			bestNodeSoFar=node
 			bestIsMidNode=childIsMidNode
-	
-	return bestNodeSoFar , bestLKdiff , bestIsMidNode
+			bestUpLK=childUpLK
+			bestDownLK=childDownLK
+			bestDownNode=childBestDownNode
+			adjustBLen=adjustBLenChild
+		if currentBestChildLK>bestOfChildLK:
+			bestOfChildLK=currentBestChildLK
+			bestChild=currentBestChild
+		# print("Inside child loop, best child")
+		# print(bestChild)
+		# print(bestOfChildLK)
+	# print("End of child loop for node")
+	# print(t1)
+	# print(t1.dist)
+	# print("best child")
+	# print(bestChild)
+	# if bestChild!=None:
+	# 	print(bestChild.dist)
+	# print(bestOfChildLK)
+	if LKdiff>=bestLKdiff-thresholdProb2:
+		bestDownLK=bestOfChildLK
+		bestDownNode=bestChild
+	# print("best node in absolute")
+	# print(bestNodeSoFar)
+	# print(bestIsMidNode)
+	# print("with lk "+str(bestLKdiff))
+	# print("LKdiff: "+str(LKdiff))
+	# print("with best child ")
+	# print(bestDownNode)
+	# print("with lk "+str(bestDownLK))
+	# print("while current best child")
+	# print(bestChild)
+	# print("with lk "+str(bestOfChildLK))
+	# print("\n\n")
+	if t1.dist>thresholdProb2 and t1.up!=None:
+		if t1.up.children[0]==t1:
+			vectUp=t1.up.probVectUpRight
+		else:
+			vectUp=t1.up.probVectUpLeft
+		if t1.dist>bLen/2:
+			newBLen2=t1.dist/4
+			bestLKdiff2=LKdiff2
+			while newBLen2>bLen/4:
+				newProbVect2=mergeVectorsUpDown(vectUp,newBLen2,t1.probVect,t1.dist-newBLen2,mutMatrix)
+				newLKdiff2=appendProb(newProbVect2,diffs,bLen,mutMatrix)
+				newLKdiff3=appendProb(newProbVect2,diffs,bLen*bLenAdjustment,mutMatrix)
+				if newLKdiff3>newLKdiff2:
+					newLKdiff2=newLKdiff3
+					adjusted=True
+				else:
+					adjusted=False
+				if newLKdiff2>bestLKdiff2:
+					bestLKdiff2=newLKdiff2
+					adjustBLen=adjusted
+				else:
+					break
+				newBLen2=newBLen2/2
+			return bestNodeSoFar , bestLKdiff , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, bestLKdiff2, t1, adjustBLen
+		else:	
+			return bestNodeSoFar , bestLKdiff , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, LKdiff2, t1, adjustBLen
+	else:
+		return bestNodeSoFar , bestLKdiff , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, bestOfChildLK, bestChild, adjustBLen
 
 
 
@@ -582,9 +946,18 @@ def rootVector0(probVect,rootFreqs):
 			newEntry[4]=True
 		elif entry[0]=="O":
 			newEntry[4]=[]
-			for i in range4:
-				newEntry[4].append(entry[4][i]*rootFreqs[i])
-			newEntry[3]=0.0
+			if newEntry[3]>thresholdProb4:
+				for i in range4:
+					tot=0.0
+					for j in range4:
+						if i==j:
+							tot+=rootFreqs[i]*(1.0+mutMatrix[i][i]*(entry[3]))*entry[4][j]
+						else:
+							tot+=rootFreqs[i]*mutMatrix[i][j]*(entry[3])*entry[4][j]
+					newEntry[4].append(tot)
+			else:
+				for i in range4:
+					newEntry[4].append(entry[4][i]*rootFreqs[i])
 		else:
 			newEntry[4]=True
 			#distance from the root on the downward branch
@@ -658,8 +1031,8 @@ def mergeVectorsUpDown(probVectUp,bLenUp,probVectDown,bLenDown,mutMatrix):
 					totLen2=bLenDown+entry2[3]
 					if entry1[0]!="O" and entry1[4]:
 						totLen1+=entry1[5]
-					if entry2[0]!="O" and entry2[4]:
-						totLen2+=entry2[5]
+					#if entry2[0]!="O" and entry2[4]:
+					#	totLen2+=entry2[5]
 					if totLen1+totLen2<thresholdProb2 and entry1[0]!=entry2[0] and entry1[0]!="O" and entry2[0]!="O":
 						print("Warning, inside mergeVectorsUpDown, branch lengths are 0, but the two vectors are different")
 						print(probVectUp)
@@ -860,7 +1233,7 @@ def mergeVectorsUpDown(probVectUp,bLenUp,probVectDown,bLenDown,mutMatrix):
 
 
 
-#merge two childn partial likelihood vectors at the root and calculate the logLk, and return vector and logLK.
+#merge two child partial likelihood vectors at the root and calculate the logLk, and return vector and logLK.
 def mergeVectorsRoot(probVect1,bLen1,probVect2,bLen2,mutMatrix):
 			cumulPartLk=0.0
 			probVect=[]
@@ -927,7 +1300,10 @@ def mergeVectorsRoot(probVect1,bLen1,probVect2,bLen2,mutMatrix):
 									tot+=mutMatrix[i][j]*(entry2[3]+bLen2)*entry2[4][j]
 							newVec[i]*=tot
 						state, newVec, maxP =simplfy(newVec,ref[pos-1])
-						probVect.append([state,pos,1,0.0,newVec])
+						if state=="O":
+							probVect.append([state,pos,1,0.0,newVec])
+						else:
+							probVect.append([state,pos,1,0.0,False])
 						cumulPartLk+=math.log(maxP)
 					else:
 						i2=alleles[entry2[0]]
@@ -984,7 +1360,10 @@ def mergeVectorsRoot(probVect1,bLen1,probVect2,bLen2,mutMatrix):
 								else:
 									newVec[i]*=mutMatrix[i][i2]*(entry2[3]+bLen2)
 					state, newVec, maxP =simplfy(newVec,ref[pos-1])
-					probVect.append([state,pos,1,0.0,newVec])
+					if state=="O":
+						probVect.append([state,pos,1,0.0,newVec])
+					else:
+						probVect.append([state,pos,1,0.0,False])
 					cumulPartLk+=math.log(maxP)
 				#entry1 is a non-ref nuc
 				else:
@@ -1014,7 +1393,10 @@ def mergeVectorsRoot(probVect1,bLen1,probVect2,bLen2,mutMatrix):
 										tot+=mutMatrix[i][j]*(entry2[3]+bLen2)*entry2[4][j]
 								newVec[i]*=tot
 							state, newVec, maxP =simplfy(newVec,ref[pos-1])
-							probVect.append([state,pos,1,0.0,newVec])
+							if state=="O":
+								probVect.append([state,pos,1,0.0,newVec])
+							else:
+								probVect.append([state,pos,1,0.0,False])
 							cumulPartLk+=math.log(maxP)
 						else:
 							if entry2[0]=="R":
@@ -1332,7 +1714,7 @@ def areVectorsDifferent(probVect1,probVect2):
 						i1=allelesLow[ref[pos-1]]
 					else:
 						i1=alleles[entry1[0]]
-					if vect[i1]<0.999:
+					if vect[i1]<0.9999:
 						return True
 			else:
 				if entry2[0]=="N":
@@ -1348,22 +1730,33 @@ def areVectorsDifferent(probVect1,probVect2):
 					i2=allelesLow[ref[pos-1]]
 				else:
 					i2=alleles[entry2[0]]
-				if vect[i2]<0.999:
+				if vect[i2]<0.9999:
 					return True
 
 		elif entry1[0]=="O":
-			vect1=entry1[4]
-			vect2=entry2[4]
-			maxP1=-1.0
-			maxP2=-1.0
+			vect1=entry1[4]/np.sum(entry1[4])
+			vect2=entry2[4]/np.sum(entry2[4])
+			# maxP1=-1.0
+			# maxP2=-1.0
+			# for i in range4:
+			# 	if vect1[i]>maxP1:
+			# 		maxP1=vect1[i]
+			# 	if vect2[i]>maxP2:
+			# 		maxP2=vect2[i]
+			# for i in range4:
+			# 	if abs((vect1[i]/maxP1) - (vect2[i]/maxP2))>0.001:
+			# 		return True
 			for i in range4:
-				if vect1[i]>maxP1:
-					maxP1=vect1[i]
-				if vect2[i]>maxP2:
-					maxP2=vect2[i]
-			for i in range4:
-				if abs((vect1[i]/maxP1) - (vect2[i]/maxP2))>0.001:
+				diffVal=abs(vect1[i] - vect2[i])
+				if diffVal>0.001 or (diffVal>thresholdProb and ((vect1[i]>thresholdProb2 and (diffVal/vect1[i])>1.5) or (vect2[i]>thresholdProb2 and (diffVal/vect2[i])>1.5))):
 					return True
+		elif entry1[0]!="N":
+			if entry1[4]!=entry2[4]:
+				return True
+			diffVal=abs(entry1[3] - entry2[3])
+			if diffVal>bLen/10:
+				return True
+
 
 		#update pos, end, etc
 		pos+=length
@@ -1393,17 +1786,17 @@ def areVectorsDifferent(probVect1,probVect2):
 
 
 #if updating lk creates an inconsistency, this function can increase the bLen from 0 so that the inconsistency is resolved.
-def updateBLen(node,childNum,bLen):
+def updateBLen(node,childNum,bLen,mutMatrix):
 	cNode=node.children[childNum]
 	if childNum==0:
 		vectUp=node.probVectUpRight
 	else:
 		vectUp=node.probVectUpLeft
-	bestLK=appendProb(vectUp,cNode.probVect,bLen)
+	bestLK=appendProb(vectUp,cNode.probVect,bLen,mutMatrix)
 	bestLen=bLen
 	while bestLen>0.1*bLen:
 		newBLen=bestLen/2
-		newLK=appendProb(vectUp,cNode.probVect,newBLen)
+		newLK=appendProb(vectUp,cNode.probVect,newBLen,mutMatrix)
 		if newLK>bestLK:
 			bestLK=newLK
 			bestLen=newBLen
@@ -1412,7 +1805,7 @@ def updateBLen(node,childNum,bLen):
 	if bestLen>0.7*bLen:
 		while bestLen<10*bLen:
 			newBLen=bestLen*2
-			newLK=appendProb(vectUp,cNode.probVect,newBLen)
+			newLK=appendProb(vectUp,cNode.probVect,newBLen,mutMatrix)
 			if newLK>bestLK:
 				bestLK=newLK
 				bestLen=newBLen
@@ -1431,9 +1824,9 @@ def updatePartialsFromTop(node,probVectUp,mutMatrix):
 		newTot=mergeVectorsUpDown(probVectUp,node.dist/2,node.probVect,node.dist/2,mutMatrix)
 		if newTot==None:
 			if node.up.children[0]==node:
-				updateBLen(node.up,0,bLen)
+				updateBLen(node.up,0,bLen,mutMatrix)
 			else:
-				updateBLen(node.up,1,bLen)
+				updateBLen(node.up,1,bLen,mutMatrix)
 			return
 		newTot=shorten(newTot)
 		node.probVectTotUp=newTot
@@ -1441,9 +1834,9 @@ def updatePartialsFromTop(node,probVectUp,mutMatrix):
 		newTot=mergeVectorsUpDown(probVectUp,node.dist,node.probVect,0.0,mutMatrix)
 		if newTot==None:
 			if node.up.children[0]==node:
-				updateBLen(node.up,0,bLen)
+				updateBLen(node.up,0,bLen,mutMatrix)
 			else:
-				updateBLen(node.up,1,bLen)
+				updateBLen(node.up,1,bLen,mutMatrix)
 			return
 		newTot=shorten(newTot)
 		node.probVectTot=newTot
@@ -1454,25 +1847,39 @@ def updatePartialsFromTop(node,probVectUp,mutMatrix):
 		dist1=node.children[1].dist
 		newUpRight=mergeVectorsUpDown(probVectUp,node.dist,child1Vect,dist1,mutMatrix)
 		newUpLeft=mergeVectorsUpDown(probVectUp,node.dist,child0Vect,dist0,mutMatrix)
+		# print("Updating from top")
+		# print(node.probVectUpRight)
+		# print(newUpRight)
+		# print(node.probVectUpLeft)
+		# print(newUpLeft)
+		#exit()
 		updatedTot=False
 		if areVectorsDifferent(node.probVectUpRight,newUpRight):
+			# print("Vectors up right are different")
+			# print(node.probVectUpRight)
+			# print(newUpRight)
+			# exit()
 			newUpRight =shorten(newUpRight)
 			node.probVectUpRight=newUpRight
 			newTot=mergeVectorsUpDown(newUpRight,0.0,child0Vect,dist0,mutMatrix)
 			if newTot==None:
-				updateBLen(node,0,bLen)
+				updateBLen(node,0,bLen,mutMatrix)
 				return
 			newTot =shorten(newTot)
 			node.probVectTot=newTot
 			updatedTot=True
 			updatePartialsFromTop(node.children[0],newUpRight,mutMatrix)
 		if areVectorsDifferent(node.probVectUpLeft,newUpLeft):
+			# print("Vectors up left are different")
+			# print(node.probVectUpLeft)
+			# print(newUpLeft)
+			# exit()
 			newUpLeft =shorten(newUpLeft)
 			node.probVectUpLeft=newUpLeft
 			if not updatedTot:
 				newTot=mergeVectorsUpDown(newUpLeft,0.0,child1Vect,dist1,mutMatrix)
 				if newTot==None:
-					updateBLen(node,1,bLen)
+					updateBLen(node,1,bLen,mutMatrix)
 					return
 				newTot =shorten(newTot)
 				node.probVectTot=newTot
@@ -1506,12 +1913,12 @@ def updatePartialsFromBottom(node,probVectDown,childNum,childNode,mutMatrix):
 		if childNum==0:
 			newTot=mergeVectorsUpDown(node.probVectUpRight,0.0,probVectDown,childDist,mutMatrix)
 			if newTot==None:
-				updateBLen(node,0,bLen)
+				updateBLen(node,0,bLen,mutMatrix)
 				return
 		else:
 			newTot=mergeVectorsUpDown(node.probVectUpLeft,0.0,probVectDown,childDist,mutMatrix)
 			if newTot==None:
-				updateBLen(node,1,bLen)
+				updateBLen(node,1,bLen,mutMatrix)
 				return
 		newTot=shorten(newTot)
 		node.probVectTot=newTot
@@ -1547,7 +1954,7 @@ def updatePartialsFromBottom(node,probVectDown,childNum,childNode,mutMatrix):
 						print(node.probVectTot)
 					newTot=mergeVectorsUpDown(newUpLeftVect,0.0,otherChildVect,otherChildDist,mutMatrix)
 					if newTot==None:
-						updateBLen(node,1,bLen)
+						updateBLen(node,1,bLen,mutMatrix)
 						return
 					newTot=shorten(newTot)
 					node.probVectTot=newTot
@@ -1565,7 +1972,7 @@ def updatePartialsFromBottom(node,probVectDown,childNum,childNode,mutMatrix):
 				if not updatedTot:
 					newTot=mergeVectorsUpDown(newUpRightVect,0.0,otherChildVect,otherChildDist,mutMatrix)
 					if newTot==None:
-						updateBLen(node,0,bLen)
+						updateBLen(node,0,bLen,mutMatrix)
 						return
 					newTot=shorten(newTot)
 					node.probVectTot=newTot
@@ -1606,320 +2013,323 @@ def updatePartialsFromBottom(node,probVectDown,childNum,childNode,mutMatrix):
 		print(node.probVectTot)
 	return
 
-#try all children branches (if meets a 0-length branch, pass the function to child node) to find the best branch where to place (mid-length) a new sample.
-#This basically takes into account polytomies (here politomies are given by 0-length branches in a binary tree).
-def findBestChildBranch(node,newPartials,sample,bLen):
-	bestLKSoFar=float("-inf")
-	bestNodeSoFar=None
-	bestVectSoFar=None
-	for c in range(len(node.children)):
-		child=node.children[c]
-		if child.dist>thresholdProb2:
-			if c==0:
-				probVectChild=mergeVectorsUpDown(node.probVectUpRight,child.dist/2,child.probVect,child.dist/2,mutMatrix)
+
+#function to add new mutation events in new sample to the pre-exisitng pseudocounts so to improve the estimate of the substitution rates
+def updatePesudoCounts(oldVector,newPartials,pseudoMutCounts):
+	if model!="JC":
+			probVect1=oldVector
+			probVect2=newPartials
+			indexEntry1=0
+			indexEntry2=0
+			pos=1
+			entry1=probVect1[indexEntry1]
+			pos1=entry1[1]
+			if entry1[0]!="N" and entry1[0]!="R":
+				end1=pos1
 			else:
-				probVectChild=mergeVectorsUpDown(node.probVectUpLeft,child.dist/2,child.probVect,child.dist/2,mutMatrix)
-			probChild=appendProb(probVectChild,newPartials,bLen)
-			if probChild>bestLKSoFar:
-				bestLKSoFar=probChild
-				bestNodeSoFar=child
-				bestVectSoFar=probVectChild
-		else:
-			childBestNode, childBestLK, childBestVect=findBestChildBranch(child,newPartials,sample,bLen)
-			if childBestLK>bestLKSoFar:
-				bestLKSoFar=childBestLK
-				bestNodeSoFar=childBestNode
-				bestVectSoFar=childBestVect
-	return bestNodeSoFar, bestLKSoFar, bestVectSoFar
-	
+				end1=pos1+entry1[2]-1
+			entry2=probVect2[indexEntry2]
+			pos2=entry2[1]
+			if entry2[0]!="N" and entry2[0]!="R":
+				end2=pos2
+			else:
+				end2=pos2+entry2[2]-1
+			end=end1
+			if end2<end:
+				end=end2
+			length=end+1-pos
+			while True:
+				if entry1[0]=="R":
+						if entry2[0]!="R" and entry2[0]!="N" and entry2[0]!="O":
+							i1=allelesLow[ref[pos-1]]
+							i2=alleles[entry2[0]]
+							pseudoMutCounts[i1][i2]+=1
+								
+				elif entry1[0]!="O" and entry1[0]!="N":
+					if entry2[0]=="R":
+							i1=alleles[entry1[0]]
+							i2=allelesLow[ref[pos-1]]
+							pseudoMutCounts[i1][i2]+=1
+					elif entry2[0]!="N" and entry2[0]!="O":
+						i1=alleles[entry1[0]]
+						i2=alleles[entry2[0]]
+						pseudoMutCounts[i1][i2]+=1
+
+				#update pos, end, etc
+				pos+=length
+				if pos>lRef:
+					break
+				if pos>end1:
+					indexEntry1+=1
+					entry1=probVect1[indexEntry1]
+					pos1=entry1[1]
+					if entry1[0]!="N" and entry1[0]!="R":
+						end1=pos1
+					else:
+						end1=pos1+entry1[2]-1
+				if pos>end2:
+					indexEntry2+=1
+					entry2=probVect2[indexEntry2]
+					pos2=entry2[1]
+					if entry2[0]!="N" and entry2[0]!="R":
+						end2=pos2
+					else:
+						end2=pos2+entry2[2]-1
+				end=end1
+				if end2<end:
+					end=end2
+				length=end+1-pos
+
+
 
 
 #we know that sample "sample", with partials "newPartials", is best placed as child of node resulting in logLK contribution of newChildLK
 # now explore exactly which position near node is best for placement (direct child, sibling or sibling of existing child), and which are the best branch lengths,
 #then add the sample at that position of the tree, and update all the internal probability vectors.
 #NEW VERSION: now not going through the children or parent, but just attaching to the best place found so far.
-def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode):
-	#if node is root, try to place as sibling of the current root.
-	if node.is_root():
-		probOldRoot = findProbRoot(node.probVect)
-		probVectRoot,probRoot = mergeVectorsRoot(node.probVect,bLen,newPartials,bLen,mutMatrix)
-		if verbose:
-			print("parent is root, trying to add new root; node.up, node.probvect, root old prob, new root vect, new root prob")
-			print(node.up)
-			print(node.probVect)
-			print(probOldRoot)
-			print(probVectRoot)
-			print(probRoot)
-		probRoot+= findProbRoot(probVectRoot)
-		parentLKdiff=probRoot-probOldRoot
-		if verbose:
-			print(" new root prob after adding root freqs; difference between old root prob and new")
-			print(probRoot)
-			print(parentLKdiff)
+def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode, bestUpLK, bestDownLK, bestDownNode,mutMatrix,pseudoMutCounts, adjustBLen):
+	# print("\n")
+	# print("placeSampleOnTreeNew on node")
+	# print(node)
+	# print(" with tot:")
+	# print(node.probVectTot)
+
+	if adjustBLen:
+		factor=bLenAdjustment
 	else:
-		parentLKdiff=float("-inf")
-	
-	#append as direct descendant of node
-	if newChildLK>=parentLKdiff and (not isMidNode):
+		factor=1.0
+
+	if isMidNode:
+		if node==node.up.children[0]:
+			child=0
+			vectUp=node.up.probVectUpRight
+		else:
+			child=1
+			vectUp=node.up.probVectUpLeft
+		bestSplit=0.5
+		bestSplitLK=newChildLK
+		childBestVect=node.probVectTotUp
+		newSplit=0.25
+		#try different positions on the existing branch
+		while newSplit*node.dist>0.1*bLen:
+			probVectParentNew=mergeVectorsUpDown(vectUp,node.dist*newSplit,node.probVect,node.dist*(1.0-newSplit),mutMatrix)
+			probChild=appendProb(probVectParentNew,newPartials,bLen*factor,mutMatrix)
+			if probChild>bestSplitLK:
+				bestSplitLK=probChild
+				bestSplit=newSplit
+				childBestVect=probVectParentNew
+			else:
+				break
+			newSplit=bestSplit/2
+		if bestSplit>0.49:
+			newSplit=0.25
+			#print("Now trying the reverse direction")
+			while newSplit*node.dist>0.1*bLen:
+				probVectParentNew=mergeVectorsUpDown(vectUp,node.dist*(1.0-newSplit),node.probVect,node.dist*newSplit,mutMatrix)
+				probChild=appendProb(probVectParentNew,newPartials,bLen*factor,mutMatrix)
+				if probChild>bestSplitLK:
+					bestSplitLK=probChild
+					bestSplit=newSplit
+					childBestVect=probVectParentNew
+				else:
+					bestSplit=1.0-bestSplit
+					break
+				newSplit=bestSplit/2
 		#now try different lengths for the new branch
-		LK1=newChildLK
-		bestLen=bLen
+		childBestVect=shorten(childBestVect)
+		LK1=bestSplitLK
+		bestLen=bLen*factor
 		while bestLen>0.1*bLen:
 			newBLen=bestLen/2
-			probChild=appendProb(node.probVectTot,newPartials,newBLen)
+			probChild=appendProb(childBestVect,newPartials,newBLen,mutMatrix)
 			if probChild>LK1:
 				LK1=probChild
 				bestLen=newBLen
 			else:
 				break
-		if bestLen>0.7*bLen:
-			while bestLen<10*bLen:
+		if bestLen>0.7*bLen*factor:
+			while bestLen<10*bLen*factor:
 				newBLen=bestLen*2
-				probChild=appendProb(node.probVectTot,newPartials,newBLen)
+				probChild=appendProb(childBestVect,newPartials,newBLen,mutMatrix)
 				if probChild>LK1:
 					LK1=probChild
 					bestLen=newBLen
 				else:
 					break
-		if bestLen<0.2*bLen:
-			LK0=appendProb(node.probVectTot,newPartials,0.0)
-			if LK0>LK1:
-				bestLen=0.0
+		#now create new internal node and append child to it
+		newInternalNode=Tree()
+		node.up.children[child]=newInternalNode
+		newInternalNode.up=node.up
+		distBottom=node.dist*(1.0-bestSplit)
+		distTop=node.dist*bestSplit
+		# print("Inside placeSampleOnTreeNew, add node midBranch ")
+		# print(sample)
+		# print(distBottom)
+		# print(bestLen)
+		newInternalNode.add_child(dist=distBottom,child=node)
+		node.up=newInternalNode
+		newInternalNode.add_child(dist=bestLen, name=sample)
+		newInternalNode.children[1].minorSequences=[]
+		newInternalNode.children[1].up=newInternalNode
+		newInternalNode.dist=distTop
+		newInternalNode.children[1].probVect=newPartials
+		newVect=mergeVectorsUpDown(vectUp,newInternalNode.dist,newPartials,bestLen,mutMatrix)
+		#newVect=shorten(newVect)
+		newInternalNode.probVectUpRight=newVect
+		newInternalNode.probVectUpLeft=childBestVect
+		newVect=mergeVectors(node.probVect,node.dist,newPartials,bestLen,mutMatrix)
+		#newVect=shorten(newVect)
+		newInternalNode.probVect=newVect
+		newVect=mergeVectorsUpDown(vectUp,distTop/2,newInternalNode.probVect,distTop/2,mutMatrix)
+		newVect=shorten(newVect)
+		newInternalNode.probVectTotUp=newVect
+		newVect=mergeVectorsUpDown(childBestVect,0.0,newPartials,bestLen,mutMatrix)
+		newVect=shorten(newVect)
+		newInternalNode.probVectTot=newVect
+		newVect=mergeVectorsUpDown(childBestVect,bestLen,newPartials,0.0,mutMatrix)
+		newVect=shorten(newVect)
+		newInternalNode.children[1].probVectTot=newVect
+		newVect=mergeVectorsUpDown(childBestVect,bestLen/2,newPartials,bestLen/2,mutMatrix)
+		newVect=shorten(newVect)
+		newInternalNode.children[1].probVectTotUp=newVect
+		updatePesudoCounts(childBestVect,newPartials,pseudoMutCounts)
+		if verbose:
+			print("new internal node added to tree")
+			print(newInternalNode.probVect)
+			print(newInternalNode.probVectUpRight)
+			print(newInternalNode.probVectUpLeft)
+			print(newInternalNode.probVectTot)
+		updatePartialsFromTop(node,newInternalNode.probVectUpRight,mutMatrix)
+		updatePartialsFromBottom(newInternalNode.up,newInternalNode.probVect,child,newInternalNode,mutMatrix)
 
-		#add parent to the root, but coinciding with the current root
-		if node.is_root():
-			newRoot=Tree()
-			newRoot.add_child(child=node,dist=0.0)
-			node.up=newRoot
-			newRoot.add_child(dist=bestLen, name=sample)
-			newRoot.children[1].up=newRoot
-			newRoot.probVectUpLeft=node.probVectTot
-			newRoot.probVectUpRight=rootVector(newPartials,rootFreqs,bestLen)
-			newRoot.probVect=mergeVectors(node.probVect,0.0,newPartials,bestLen,mutMatrix)
-			newVect=rootVector0(newRoot.probVect,rootFreqs)
-			newVect=shorten(newVect)
-			newRoot.probVectTot=newVect
-			newVect=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen,newPartials,0.0,mutMatrix)
-			newVect=shorten(newVect)
-			newRoot.children[1].probVectTot=newVect
-			newRoot.children[1].minorSequences=[]
-			newRoot.children[1].probVect=newPartials
-			newVect=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen/2,newPartials,bestLen/2,mutMatrix)
-			newVect=shorten(newVect)
-			newRoot.children[1].probVectTotUp=newVect
-			if verbose:
-				print("new root added to tree, identical to previous root")
-				print(newRoot.probVect)
-				print(newRoot.children[0].probVect)
-				print(newRoot.children[1].probVect)
-			updatePartialsFromTop(node,newRoot.probVectUpRight,mutMatrix)
-			return newRoot
+	#best lk so far is for uppending directly to existing node
+	else:
 
-		#add parent to node, but coinciding with it
-		else:
-			if node==node.up.children[0]:
+		if bestDownNode!=None:
+			if bestDownNode==bestDownNode.up.children[0]:
 				child=0
-				vectUp=node.up.probVectUpRight
+				vectUp=bestDownNode.up.probVectUpRight
 			else:
 				child=1
-				vectUp=node.up.probVectUpLeft
-			#now create new internal node and append child to it
-			newInternalNode=Tree()
-			node.up.children[child]=newInternalNode
-			newInternalNode.up=node.up
-			newInternalNode.dist=node.dist
-			newInternalNode.add_child(dist=0.0,child=node)
-			node.up=newInternalNode
-			newInternalNode.add_child(dist=bestLen, name=sample)
-			newInternalNode.children[1].minorSequences=[]
-			newInternalNode.children[1].up=newInternalNode
-			newInternalNode.children[1].probVect=newPartials
-			newVect=mergeVectorsUpDown(vectUp,newInternalNode.dist,newPartials,bestLen,mutMatrix)
-			#newVect=shorten(newVect)
-			newInternalNode.probVectUpRight=newVect
-			newInternalNode.probVectUpLeft=node.probVectTot
-			newVect=mergeVectors(node.probVect,0.0,newPartials,bestLen,mutMatrix)
-			#newVect=shorten(newVect)
-			newInternalNode.probVect=newVect
-			newVect=mergeVectorsUpDown(newInternalNode.probVectUpLeft,0.0,newPartials,bestLen,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.probVectTot=newVect
-			newVect=mergeVectorsUpDown(vectUp,newInternalNode.dist/2,newInternalNode.probVect,newInternalNode.dist/2,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.probVectTotUp=newVect
-			newVect=mergeVectorsUpDown(newInternalNode.probVectUpLeft,bestLen,newPartials,0.0,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.children[1].probVectTot=newVect
-			newVect=mergeVectorsUpDown(newInternalNode.probVectUpLeft,bestLen/2,newPartials,bestLen/2,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.children[1].probVectTotUp=newVect
-			if verbose:
-				print("new internal node and child node added to tree")
-				print(newInternalNode.probVect)
-				print(newInternalNode.probVectUpRight)
-				print(newInternalNode.probVectUpLeft)
-				print(newInternalNode.probVectTot)
-			updatePartialsFromTop(node,newInternalNode.probVectUpRight,mutMatrix)
-			updatePartialsFromBottom(newInternalNode.up,newInternalNode.probVect,child,newInternalNode,mutMatrix)
-
-	else: #add a new parent to node
-		#add a new root!
-		if node.is_root():
-			bestLen1=bLen
-			bestLK1=parentLKdiff
-			rootBestVect=probVectRoot
-			while bestLen1>0.1*bLen:
-				newBLen=bestLen1/2
-				newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,newBLen,newPartials,bLen,mutMatrix)
-				newProbRoot+= findProbRoot(newProbVectRoot)
-				LKdiffRoot=newProbRoot-probOldRoot
-				if LKdiffRoot>bestLK1:
-					bestLK1=LKdiffRoot
-					bestLen1=newBLen
-					rootBestVect=newProbVectRoot
-				else:
-					break
-			if bestLen1>0.7*bLen:
-				while bestLen1<10*bLen:
-					newBLen=bestLen1*2
-					newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,newBLen,newPartials,bLen,mutMatrix)
-					newProbRoot+= findProbRoot(newProbVectRoot)
-					LKdiffRoot=newProbRoot-probOldRoot
-					if LKdiffRoot>bestLK1:
-						bestLK1=LKdiffRoot
-						bestLen1=newBLen
-						rootBestVect=newProbVectRoot
-					else:
-						break
-			#now try different lengths for right branch
-			bestLen2=bLen
-			while bestLen2>0.1*bLen:
-				newBLen=bestLen2/2
-				newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,bestLen1,newPartials,newBLen,mutMatrix)
-				newProbRoot+= findProbRoot(newProbVectRoot)
-				LKdiffRoot=newProbRoot-probOldRoot
-				if LKdiffRoot>bestLK1:
-					bestLK1=LKdiffRoot
-					bestLen2=newBLen
-					rootBestVect=newProbVectRoot
-				else:
-					break
-			if bestLen2>0.7*bLen:
-				while bestLen2<10*bLen:
-					newBLen=bestLen2*2
-					newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,bestLen1,newPartials,newBLen,mutMatrix)
-					newProbRoot+= findProbRoot(newProbVectRoot)
-					LKdiffRoot=newProbRoot-probOldRoot
-					if LKdiffRoot>bestLK1:
-						bestLK1=LKdiffRoot
-						bestLen2=newBLen
-						rootBestVect=newProbVectRoot
-					else:
-						break
-			if bestLen2<0.2*bLen:
-				newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,bestLen1,newPartials,0.0,mutMatrix)
-				newProbRoot+= findProbRoot(newProbVectRoot)
-				LK0=newProbRoot-probOldRoot
-				if LK0>bestLK1:
-					bestLen2=0.0
-					bestLK1=LK0
-					rootBestVect=newProbVectRoot
-			#now creating new root
-			newRoot=Tree()
-			newRoot.probVect=rootBestVect
-			newVect=rootVector0(rootBestVect,rootFreqs)
-			newVect=shorten(newVect)
-			newRoot.probVectTot=newVect
-			newRoot.probVectUpRight=rootVector(newPartials,rootFreqs,bestLen2)
-			newRoot.probVectUpLeft=rootVector(node.probVect,rootFreqs,bestLen1)
-			newRoot.add_child(child=node,dist=bestLen1)
-			node.up=newRoot
-			newRoot.add_child(dist=bestLen2, name=sample)
-			newRoot.children[1].probVect=newPartials
-			newVect=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen2,newPartials,0.0,mutMatrix)
-			newVect=shorten(newVect)
-			newRoot.children[1].probVectTot=newVect
-			newVect=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen2/2,newPartials,bestLen2/2,mutMatrix)
-			newVect=shorten(newVect)
-			newRoot.children[1].probVectTotUp=newVect
-			newRoot.children[1].minorSequences=[]
-			newRoot.children[1].up=newRoot
-			if verbose:
-				print("new root added to tree")
-				print(newRoot.probVect)
-				print(newRoot.children[0].probVect)
-				print(newRoot.children[1].probVect)
-			updatePartialsFromTop(node,newRoot.probVectUpRight,mutMatrix)
-			return newRoot
-		
-		#add parent to node, knowing that node is not the root
-		else:
-			if node==node.up.children[0]:
-				child=0
-				vectUp=node.up.probVectUpRight
-			else:
-				child=1
-				vectUp=node.up.probVectUpLeft
+				vectUp=bestDownNode.up.probVectUpLeft
 			bestSplit=0.5
-			bestSplitLK=parentLKdiff
-			childBestVect=node.probVectTotUp
-			#try different positions on the existing branch
-			while bestSplit>0.05:
-				newSplit=bestSplit/2
-				probVectParentNew=mergeVectorsUpDown(vectUp,node.dist*newSplit,node.probVect,node.dist*(1.0-newSplit),mutMatrix)
-				probChild=appendProb(probVectParentNew,newPartials,bLen)
+			bestSplitLK=bestDownLK
+			childBestVect=bestDownNode.probVectTotUp
+			newSplit=0.25
+			while newSplit*bestDownNode.dist>0.1*bLen:
+				probVectParentNew=mergeVectorsUpDown(vectUp,bestDownNode.dist*newSplit,bestDownNode.probVect,bestDownNode.dist*(1.0-newSplit),mutMatrix)
+				probChild=appendProb(probVectParentNew,newPartials,bLen*factor,mutMatrix)
 				if probChild>bestSplitLK:
 					bestSplitLK=probChild
 					bestSplit=newSplit
 					childBestVect=probVectParentNew
 				else:
 					break
-			if bestSplit>0.49:
-				#print("Now trying the reverse direction")
-				while bestSplit>0.05:
-					newSplit=bestSplit/2
-					probVectParentNew=mergeVectorsUpDown(vectUp,node.dist*(1.0-newSplit),node.probVect,node.dist*newSplit,mutMatrix)
-					probChild=appendProb(probVectParentNew,newPartials,bLen)
-					if probChild>bestSplitLK:
-						bestSplitLK=probChild
-						bestSplit=newSplit
-						childBestVect=probVectParentNew
-					else:
-						bestSplit=1.0-bestSplit
-						break
-			#now try different lengths for the new branch
+				newSplit=bestSplit/2
+			bestChildLK=bestSplitLK
+			bestChildSplit=bestSplit
+		else:
+			bestChildLK=float("-inf")
+		# print("best down node:")
+		# print(bestDownNode)
+		# print("bestChildLK: "+str(bestChildLK))
+
+
+		#if node is root, try to place as sibling of the current root.
+		if node.is_root():
+			probOldRoot = findProbRoot(node.probVect)
+			probVectRoot,probRoot = mergeVectorsRoot(node.probVect,bLen,newPartials,bLen*factor,mutMatrix)
+			probRoot+= findProbRoot(probVectRoot)
+			parentLKdiff=probRoot-probOldRoot
+			bestRootBL=bLen
+			parentBestVect=probVectRoot
+			newBL=0.5*bLen
+			while newBL>0.1*bLen:
+				probVectRoot,probRoot = mergeVectorsRoot(node.probVect,newBL,newPartials,bLen*factor,mutMatrix)
+				probRoot+= findProbRoot(probVectRoot)
+				newDiff=probRoot-probOldRoot
+				if newDiff>parentLKdiff:
+					parentLKdiff=newDiff
+					bestRootBL=newBL
+					parentBestVect=probVectRoot
+				else:
+					break
+				newBL=bestRootBL/2
+			#print("node is root, parentLKdiff: "+str(parentLKdiff))
+
+		else:
+			if node==node.up.children[0]:
+				child=0
+				vectUp=node.up.probVectUpRight
+			else:
+				child=1
+				vectUp=node.up.probVectUpLeft
+			#print("node distance from parent: "+str(node.dist))
+			#print("bestUpLK: "+str(bestUpLK))
+			bestSplit=0.5
+			bestSplitLK=bestUpLK
+			parentBestVect=node.probVectTotUp
+			newSplit=0.25
+			while newSplit*node.dist>0.1*bLen:
+				probVectParentNew=mergeVectorsUpDown(vectUp,node.dist*(1.0-newSplit),node.probVect,node.dist*newSplit,mutMatrix)
+				probChild=appendProb(probVectParentNew,newPartials,bLen*factor,mutMatrix)
+				if probChild>bestSplitLK:
+					bestSplitLK=probChild
+					bestSplit=newSplit
+					parentBestVect=probVectParentNew
+				else:
+					break
+				newSplit=bestSplit/2
+			parentLKdiff=bestSplitLK
+			bestParentSplit=bestSplit
+			#print("node is not root, parentLKdiff: "+str(parentLKdiff))
+			#print("newChildLK: "+str(newChildLK))
+		
+		#add internal node below "node"
+		if bestChildLK>=parentLKdiff and bestChildLK>=newChildLK:
+			if bestDownNode==bestDownNode.up.children[0]:
+				child=0
+				vectUp=bestDownNode.up.probVectUpRight
+			else:
+				child=1
+				vectUp=bestDownNode.up.probVectUpLeft
 			childBestVect=shorten(childBestVect)
-			LK1=bestSplitLK
-			bestLen=bLen
+
+			LK1=bestChildLK
+			bestLen=bLen*factor
 			while bestLen>0.1*bLen:
 				newBLen=bestLen/2
-				probChild=appendProb(childBestVect,newPartials,newBLen)
+				probChild=appendProb(childBestVect,newPartials,newBLen,mutMatrix)
 				if probChild>LK1:
 					LK1=probChild
 					bestLen=newBLen
 				else:
 					break
-			if bestLen>0.7*bLen:
-				while bestLen<10*bLen:
+			if bestLen>0.7*bLen*factor:
+				while bestLen<10*bLen*factor:
 					newBLen=bestLen*2
-					probChild=appendProb(childBestVect,newPartials,newBLen)
+					probChild=appendProb(childBestVect,newPartials,newBLen,mutMatrix)
 					if probChild>LK1:
 						LK1=probChild
 						bestLen=newBLen
 					else:
 						break
 			if bestLen<0.2*bLen:
-				LK0=appendProb(childBestVect,newPartials,0.0)
+				LK0=appendProb(childBestVect,newPartials,0.0,mutMatrix)
 				if LK0>LK1:
 					bestLen=0.0
 			#now create new internal node and append child to it
 			newInternalNode=Tree()
-			node.up.children[child]=newInternalNode
-			newInternalNode.up=node.up
-			distBottom=node.dist*(1.0-bestSplit)
-			distTop=node.dist*bestSplit
-			newInternalNode.add_child(dist=distBottom,child=node)
-			node.up=newInternalNode
+			bestDownNode.up.children[child]=newInternalNode
+			newInternalNode.up=bestDownNode.up
+			distBottom=bestDownNode.dist*(1.0-bestChildSplit)
+			distTop=bestDownNode.dist*bestChildSplit
+			# print("Inside placeSampleOnTreeNew, add node below node ")
+			# print(sample)
+			# print(distBottom)
+			# print(bestLen)
+			newInternalNode.add_child(dist=distBottom,child=bestDownNode)
+			bestDownNode.up=newInternalNode
 			newInternalNode.add_child(dist=bestLen, name=sample)
 			newInternalNode.children[1].minorSequences=[]
 			newInternalNode.children[1].up=newInternalNode
@@ -1929,7 +2339,7 @@ def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode):
 			#newVect=shorten(newVect)
 			newInternalNode.probVectUpRight=newVect
 			newInternalNode.probVectUpLeft=childBestVect
-			newVect=mergeVectors(node.probVect,node.dist,newPartials,bestLen,mutMatrix)
+			newVect=mergeVectors(bestDownNode.probVect,bestDownNode.dist,newPartials,bestLen,mutMatrix)
 			#newVect=shorten(newVect)
 			newInternalNode.probVect=newVect
 			newVect=mergeVectorsUpDown(vectUp,distTop/2,newInternalNode.probVect,distTop/2,mutMatrix)
@@ -1941,418 +2351,191 @@ def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode):
 			newVect=mergeVectorsUpDown(childBestVect,bestLen,newPartials,0.0,mutMatrix)
 			newVect=shorten(newVect)
 			newInternalNode.children[1].probVectTot=newVect
-			newVect=mergeVectorsUpDown(childBestVect,bestLen/2,newPartials,bestLen/2,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.children[1].probVectTotUp=newVect
+			if bestLen>thresholdProb4:
+				newVect=mergeVectorsUpDown(childBestVect,bestLen/2,newPartials,bestLen/2,mutMatrix)
+				newVect=shorten(newVect)
+				newInternalNode.children[1].probVectTotUp=newVect
+			updatePesudoCounts(childBestVect,newPartials,pseudoMutCounts)
 			if verbose:
 				print("new internal node added to tree")
 				print(newInternalNode.probVect)
 				print(newInternalNode.probVectUpRight)
 				print(newInternalNode.probVectUpLeft)
 				print(newInternalNode.probVectTot)
-			updatePartialsFromTop(node,newInternalNode.probVectUpRight,mutMatrix)
+			updatePartialsFromTop(bestDownNode,newInternalNode.probVectUpRight,mutMatrix)
 			updatePartialsFromBottom(newInternalNode.up,newInternalNode.probVect,child,newInternalNode,mutMatrix)
-
-	return None
-
-
-
-
-
-#we know that sample "sample", with partials "newPartials", is best placed as child of node resulting in logLK contribution of newChildLK
-# now explore exactly which position near node is best for placement (direct child, sibling or sibling of existing child), and which are the best branch lengths,
-#then add the sample at that position of the tree, and update all the internal probability vectors.
-def placeSampleOnTree(node,newPartials,sample,bLen,newChildLK):
-	if len(node.children)>0:
-		childBestNode, childBestLK, childBestVect=findBestChildBranch(node,newPartials,sample,bLen)
-	else:
-		childBestLK=float("-inf")
-		childBestNode=None
-		childBestVect=None
-	#if node is root, try to place as sibling of the current root.
-	if node.is_root():
-		probOldRoot = findProbRoot(node.probVect)
-		probVectRoot,probRoot = mergeVectorsRoot(node.probVect,bLen,newPartials,bLen,mutMatrix)
-		if verbose:
-			print("parent is root, trying to add new root; node.up, node.probvect, root old prob, new root vect, new root prob")
-			print(node.up)
-			print(node.probVect)
-			print(probOldRoot)
-			print(probVectRoot)
-			print(probRoot)
-		probRoot+= findProbRoot(probVectRoot)
-		parentLKdiff=probRoot-probOldRoot
-		if verbose:
-			print(" new root prob after adding root freqs; difference between old root prob and new")
-			print(probRoot)
-			print(parentLKdiff)
-	else:
-		if node==node.up.children[0]:
-			probVectParent=mergeVectorsUpDown(node.up.probVectUpRight,node.dist/2,node.probVect,node.dist/2,mutMatrix)
-		else:
-			probVectParent=mergeVectorsUpDown(node.up.probVectUpLeft,node.dist/2,node.probVect,node.dist/2,mutMatrix)
-		parentLKdiff=appendProb(probVectParent,newPartials,bLen)
-		if verbose:
-			print(" non-root parent placement prob and vector:")
-			print(probVectParent)
-			print(parentLKdiff)
-	
-	#append as direct descendant of node
-	if newChildLK>=parentLKdiff and newChildLK>=childBestLK:
-		#now try different lengths for the new branch
-		LK1=newChildLK
-		bestLen=bLen
-		while bestLen>0.1*bLen:
-			newBLen=bestLen/2
-			probChild=appendProb(node.probVectTot,newPartials,newBLen)
-			if probChild>LK1:
-				LK1=probChild
-				bestLen=newBLen
-			else:
-				break
-		if bestLen>0.7*bLen:
-			while bestLen<10*bLen:
-				newBLen=bestLen*2
-				probChild=appendProb(node.probVectTot,newPartials,newBLen)
-				if probChild>LK1:
-					LK1=probChild
-					bestLen=newBLen
-				else:
-					break
-		LK0=appendProb(node.probVectTot,newPartials,0.0)
-		if LK0>LK1:
-			bestLen=0.0
-
-		#add parent to the root, but coinciding with the current root
-		if node.is_root():
-			newRoot=Tree()
-			newRoot.add_child(child=node,dist=0.0)
-			node.up=newRoot
-			newRoot.add_child(dist=bestLen, name=sample)
-			newRoot.children[1].up=newRoot
-			newRoot.probVectUpLeft=node.probVectTot
-			newRoot.probVectUpRight=rootVector(newPartials,rootFreqs,bestLen)
-			newRoot.probVect=mergeVectors(node.probVect,0.0,newPartials,bestLen,mutMatrix)
-			newRoot.probVectTot=rootVector0(newRoot.probVect,rootFreqs)
-			newRoot.children[1].probVectTot=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen,newPartials,0.0,mutMatrix)
-			newRoot.children[1].minorSequences=[]
-			newRoot.children[1].probVect=newPartials
-			if verbose:
-				print("new root added to tree, identical to previous root")
-				print(newRoot.probVect)
-				print(newRoot.children[0].probVect)
-				print(newRoot.children[1].probVect)
-			updatePartialsFromTop(node,newRoot.probVectUpRight,mutMatrix)
-			return newRoot
-
-		#add parent to node, but coinciding with it
-		else:
-			if node==node.up.children[0]:
-				child=0
-				vectUp=node.up.probVectUpRight
-			else:
-				child=1
-				vectUp=node.up.probVectUpLeft
-			#now create new internal node and append child to it
-			newInternalNode=Tree()
-			node.up.children[child]=newInternalNode
-			newInternalNode.up=node.up
-			newInternalNode.dist=node.dist
-			newInternalNode.add_child(dist=0.0,child=node)
-			node.up=newInternalNode
-			newInternalNode.add_child(dist=bestLen, name=sample)
-			newInternalNode.children[1].minorSequences=[]
-			newInternalNode.children[1].up=newInternalNode
-			newInternalNode.children[1].probVect=newPartials
-			newVect=mergeVectorsUpDown(vectUp,newInternalNode.dist,newPartials,bestLen,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.probVectUpRight=newVect
-			newInternalNode.probVectUpLeft=node.probVectTot
-			newVect=mergeVectors(node.probVect,0.0,newPartials,bestLen,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.probVect=newVect
-			newVect=mergeVectorsUpDown(newInternalNode.probVectUpLeft,0.0,newPartials,bestLen,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.probVectTot=newVect
-			newVect=mergeVectorsUpDown(newInternalNode.probVectUpLeft,bestLen,newPartials,0.0,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.children[1].probVectTot=newVect
-			if verbose:
-				print("new internal node and child node added to tree")
-				print(newInternalNode.probVect)
-				print(newInternalNode.probVectUpRight)
-				print(newInternalNode.probVectUpLeft)
-				print(newInternalNode.probVectTot)
-			updatePartialsFromTop(node,newInternalNode.probVectUpRight,mutMatrix)
-			updatePartialsFromBottom(newInternalNode.up,newInternalNode.probVect,child,newInternalNode,mutMatrix)
-
-	#put new sample as descendant of a new internal node on one of the children branches
-	elif childBestLK>=parentLKdiff: 
-		if childBestNode==childBestNode.up.children[0]:
-			child=0
-			vectUp=childBestNode.up.probVectUpRight
-		else:
-			child=1
-			vectUp=childBestNode.up.probVectUpLeft
-		bestSplit=0.5
-		bestSplitLK=childBestLK
-		#try different positions on the existing branch
-		while bestSplit>0.01:
-			newSplit=bestSplit/2
-			probVectChildNew=mergeVectorsUpDown(vectUp,childBestNode.dist*newSplit,childBestNode.probVect,childBestNode.dist*(1.0-newSplit),mutMatrix)
-			probChild=appendProb(probVectChildNew,newPartials,bLen)
-			if probChild>bestSplitLK:
-				bestSplitLK=probChild
-				bestSplit=newSplit
-				childBestVect=probVectChildNew
-			else:
-				break
-		if bestSplit>0.49:
-			while bestSplit>0.01:
-				newSplit=bestSplit/2
-				probVectChildNew=mergeVectorsUpDown(vectUp,childBestNode.dist*(1.0-newSplit),childBestNode.probVect,childBestNode.dist*newSplit,mutMatrix)
-				probChild=appendProb(probVectChildNew,newPartials,bLen)
-				if probChild>bestSplitLK:
-					bestSplitLK=probChild
-					bestSplit=newSplit
-					childBestVect=probVectChildNew
-				else:
-					bestSplit=1.0-bestSplit
-					break
-		#now try different lengths for the new branch
-		childBestVect=shorten(childBestVect)
-		LK1=bestSplitLK
-		bestLen=bLen
-		while bestLen>0.1*bLen:
-			newBLen=bestLen/2
-			probChild=appendProb(childBestVect,newPartials,newBLen)
-			if probChild>LK1:
-				LK1=probChild
-				bestLen=newBLen
-			else:
-				break
-		if bestLen>0.7*bLen:
-			while bestLen<10*bLen:
-				newBLen=bestLen*2
-				probChild=appendProb(childBestVect,newPartials,newBLen)
-				if probChild>LK1:
-					LK1=probChild
-					bestLen=newBLen
-				else:
-					break
-		LK0=appendProb(childBestVect,newPartials,0.0)
-		if LK0>LK1:
-			bestLen=0.0
-		#now create new internal node and append child to it
-		newInternalNode=Tree()
-		childBestNode.up.children[child]=newInternalNode
-		newInternalNode.up=childBestNode.up
-		distBottom=childBestNode.dist*(1.0-bestSplit)
-		distTop=childBestNode.dist*bestSplit
-		newInternalNode.add_child(dist=distBottom,child=childBestNode)
-		childBestNode.up=newInternalNode
-		newInternalNode.add_child(dist=bestLen, name=sample)
-		newInternalNode.children[1].minorSequences=[]
-		newInternalNode.children[1].up=newInternalNode
-		newInternalNode.dist=distTop
-		newInternalNode.children[1].probVect=newPartials
-		newVect=mergeVectorsUpDown(vectUp,newInternalNode.dist,newPartials,bestLen,mutMatrix)
-		newVect=shorten(newVect)
-		newInternalNode.probVectUpRight=newVect
-		newInternalNode.probVectUpLeft=childBestVect
-		newVect=mergeVectors(childBestNode.probVect,childBestNode.dist,newPartials,bestLen,mutMatrix)
-		newVect=shorten(newVect)
-		newInternalNode.probVect=newVect
-		newVect=mergeVectorsUpDown(childBestVect,0.0,newPartials,bestLen,mutMatrix)
-		newVect=shorten(newVect)
-		newInternalNode.probVectTot=newVect
-		newVect=mergeVectorsUpDown(childBestVect,bestLen,newPartials,0.0,mutMatrix)
-		newVect=shorten(newVect)
-		newInternalNode.children[1].probVectTot=newVect
-		if verbose:
-			print("new internal node added to tree")
-			print(newInternalNode.probVect)
-			print(newInternalNode.probVectUpRight)
-			print(newInternalNode.probVectUpLeft)
-			print(newInternalNode.probVectTot)
-		updatePartialsFromTop(childBestNode,newInternalNode.probVectUpRight,mutMatrix)
-		updatePartialsFromBottom(newInternalNode.up,newInternalNode.probVect,child,newInternalNode,mutMatrix)
-	
-	else: #add a new parent to node
-		#add a new root!
-		if node.is_root():
-			bestLen1=bLen
-			bestLK1=parentLKdiff
-			rootBestVect=probVectRoot
-			while bestLen1>0.1*bLen:
-				newBLen=bestLen1/2
-				newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,newBLen,newPartials,bLen,mutMatrix)
-				newProbRoot+= findProbRoot(newProbVectRoot)
-				LKdiffRoot=newProbRoot-probOldRoot
-				if LKdiffRoot>bestLK1:
-					bestLK1=LKdiffRoot
-					bestLen1=newBLen
-					rootBestVect=newProbVectRoot
-				else:
-					break
-			if bestLen1>0.7*bLen:
-				while bestLen1<10*bLen:
-					newBLen=bestLen1*2
-					newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,newBLen,newPartials,bLen,mutMatrix)
-					newProbRoot+= findProbRoot(newProbVectRoot)
-					LKdiffRoot=newProbRoot-probOldRoot
-					if LKdiffRoot>bestLK1:
-						bestLK1=LKdiffRoot
-						bestLen1=newBLen
-						rootBestVect=newProbVectRoot
-					else:
-						break
-			#now try different lengths for right branch
-			bestLen2=bLen
-			while bestLen2>0.1*bLen:
-				newBLen=bestLen2/2
-				newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,bestLen1,newPartials,newBLen,mutMatrix)
-				newProbRoot+= findProbRoot(newProbVectRoot)
-				LKdiffRoot=newProbRoot-probOldRoot
-				if LKdiffRoot>bestLK1:
-					bestLK1=LKdiffRoot
-					bestLen2=newBLen
-					rootBestVect=newProbVectRoot
-				else:
-					break
-			if bestLen2>0.7*bLen:
-				while bestLen2<10*bLen:
-					newBLen=bestLen2*2
-					newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,bestLen1,newPartials,newBLen,mutMatrix)
-					newProbRoot+= findProbRoot(newProbVectRoot)
-					LKdiffRoot=newProbRoot-probOldRoot
-					if LKdiffRoot>bestLK1:
-						bestLK1=LKdiffRoot
-						bestLen2=newBLen
-						rootBestVect=newProbVectRoot
-					else:
-						break
-			newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,bestLen1,newPartials,0.0,mutMatrix)
-			newProbRoot+= findProbRoot(newProbVectRoot)
-			LK0=newProbRoot-probOldRoot
-			if LK0>bestLK1:
-				bestLen2=0.0
-				bestLK1=LK0
-				rootBestVect=newProbVectRoot
-			#now creating new root
-			newRoot=Tree()
-			newRoot.probVect=rootBestVect
-			newRoot.probVectTot=rootVector0(rootBestVect,rootFreqs)
-			newRoot.probVectUpRight=rootVector(newPartials,rootFreqs,bestLen2)
-			newRoot.probVectUpLeft=rootVector(node.probVect,rootFreqs,bestLen1)
-			newRoot.add_child(child=node,dist=bestLen1)
-			node.up=newRoot
-			newRoot.add_child(dist=bestLen2, name=sample)
-			newRoot.children[1].probVect=newPartials
-			newRoot.children[1].probVectTot=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen2,newPartials,0.0,mutMatrix)
-			newRoot.children[1].minorSequences=[]
-			newRoot.children[1].up=newRoot
-			if verbose:
-				print("new root added to tree")
-				print(newRoot.probVect)
-				print(newRoot.children[0].probVect)
-				print(newRoot.children[1].probVect)
-			updatePartialsFromTop(node,newRoot.probVectUpRight,mutMatrix)
-			return newRoot
 		
-		#add parent to node, knowing that node is not the root
+		#add new parent to "node"
 		else:
-			if node==node.up.children[0]:
-				child=0
-				vectUp=node.up.probVectUpRight
-			else:
-				child=1
-				vectUp=node.up.probVectUpLeft
-			bestSplit=0.5
-			bestSplitLK=parentLKdiff
-			childBestVect=probVectParent
-			#try different positions on the existing branch
-			while bestSplit>0.01:
-				newSplit=bestSplit/2
-				probVectParentNew=mergeVectorsUpDown(vectUp,node.dist*newSplit,node.probVect,node.dist*(1.0-newSplit),mutMatrix)
-				probChild=appendProb(probVectParentNew,newPartials,bLen)
-				if probChild>bestSplitLK:
-					bestSplitLK=probChild
-					bestSplit=newSplit
-					childBestVect=probVectParentNew
-				else:
-					break
-			if bestSplit>0.49:
-				#print("Now trying the reverse direction")
-				while bestSplit>0.01:
-					newSplit=bestSplit/2
-					probVectParentNew=mergeVectorsUpDown(vectUp,node.dist*(1.0-newSplit),node.probVect,node.dist*newSplit,mutMatrix)
-					probChild=appendProb(probVectParentNew,newPartials,bLen)
-					if probChild>bestSplitLK:
-						bestSplitLK=probChild
-						bestSplit=newSplit
-						childBestVect=probVectParentNew
+			#new parent is actually part of a polytomy
+			if newChildLK>=parentLKdiff:
+				bestRootBL=0.0
+				bestParentSplit=0.0
+				parentLKdiff=newChildLK
+				parentBestVect=node.probVectTot
+				if node.is_root():
+					probVectRoot,probRoot = mergeVectorsRoot(node.probVect,0.0,newPartials,bLen*factor,mutMatrix)
+					parentBestVect=probVectRoot
+
+			#add parent to the root
+			if node.is_root():
+
+				#now try different lengths for right branch
+				bestLen2=bLen*factor
+				while bestLen2>0.1*bLen:
+					newBLen=bestLen2/2
+					newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,bestRootBL,newPartials,newBLen,mutMatrix)
+					newProbRoot+= findProbRoot(newProbVectRoot)
+					LKdiffRoot=newProbRoot-probOldRoot
+					if LKdiffRoot>parentLKdiff:
+						parentLKdiff=LKdiffRoot
+						bestLen2=newBLen
+						probVectRoot=newProbVectRoot
 					else:
-						bestSplit=1.0-bestSplit
 						break
-			#now try different lengths for the new branch
-			childBestVect=shorten(childBestVect)
-			LK1=bestSplitLK
-			bestLen=bLen
-			while bestLen>0.1*bLen:
-				newBLen=bestLen/2
-				probChild=appendProb(childBestVect,newPartials,newBLen)
-				if probChild>LK1:
-					LK1=probChild
-					bestLen=newBLen
+				if bestLen2>0.7*bLen*factor:
+					while bestLen2<10*bLen*factor:
+						newBLen=bestLen2*2
+						newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,bestRootBL,newPartials,newBLen,mutMatrix)
+						newProbRoot+= findProbRoot(newProbVectRoot)
+						LKdiffRoot=newProbRoot-probOldRoot
+						if LKdiffRoot>parentLKdiff:
+							parentLKdiff=LKdiffRoot
+							bestLen2=newBLen
+							probVectRoot=newProbVectRoot
+						else:
+							break
+				if bestLen2<0.2*bLen:
+					newProbVectRoot,newProbRoot = mergeVectorsRoot(node.probVect,bestRootBL,newPartials,0.0,mutMatrix)
+					newProbRoot+= findProbRoot(newProbVectRoot)
+					LK0=newProbRoot-probOldRoot
+					if LK0>parentLKdiff:
+						bestLen2=0.0
+						parentLKdiff=LK0
+						probVectRoot=newProbVectRoot
+
+				newRoot=Tree()
+				# print("Inside placeSampleOnTreeNew, add node above root ")
+				# print(sample)
+				# print(bestRootBL)
+				# print(bestLen2)
+				newRoot.probVect=probVectRoot
+				newVect=rootVector0(probVectRoot,rootFreqs)
+				newVect=shorten(newVect)
+				newRoot.probVectTot=newVect
+				newRoot.probVectUpRight=rootVector(newPartials,rootFreqs,bestLen2)
+				newRoot.probVectUpLeft=rootVector(node.probVect,rootFreqs,bestRootBL)
+				newRoot.add_child(child=node,dist=bestRootBL)
+				node.up=newRoot
+				newRoot.add_child(dist=bestLen2, name=sample)
+				newRoot.children[1].probVect=newPartials
+				newVect=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen2,newPartials,0.0,mutMatrix)
+				newVect=shorten(newVect)
+				newRoot.children[1].probVectTot=newVect
+				if bestLen2>thresholdProb4:
+					newVect=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen2/2,newPartials,bestLen2/2,mutMatrix)
+					newVect=shorten(newVect)
+					newRoot.children[1].probVectTotUp=newVect
+				newRoot.children[1].minorSequences=[]
+				newRoot.children[1].up=newRoot
+				if verbose:
+					print("new root added to tree")
+					print(newRoot.probVect)
+					print(newRoot.children[0].probVect)
+					print(newRoot.children[1].probVect)
+				updatePartialsFromTop(node,newRoot.probVectUpRight,mutMatrix)
+				# if sample=="EPI_ISL_1113446":
+				# 	print(newRoot.probVectTot)
+				# 	print(newRoot.probVectUpRight)
+				# 	print(newRoot.probVectUpLeft)
+				# 	print(newRoot.probVect)
+				# 	print(bestRootBL)
+				# 	print(node.probVect)
+				# 	print(bestLen2)
+				# 	exit()
+				return newRoot
+
+			#add parent to node
+			else:
+				if node==node.up.children[0]:
+					child=0
+					vectUp=node.up.probVectUpRight
 				else:
-					break
-			if bestLen>0.7*bLen:
-				while bestLen<10*bLen:
-					newBLen=bestLen*2
-					probChild=appendProb(childBestVect,newPartials,newBLen)
+					child=1
+					vectUp=node.up.probVectUpLeft
+				
+				#now try different lengths for the new branch
+				LK1=parentLKdiff
+				bestLen=bLen*factor
+				while bestLen>0.1*bLen:
+					newBLen=bestLen/2
+					probChild=appendProb(parentBestVect,newPartials,newBLen,mutMatrix)
 					if probChild>LK1:
 						LK1=probChild
 						bestLen=newBLen
 					else:
 						break
-			LK0=appendProb(childBestVect,newPartials,0.0)
-			if LK0>LK1:
-				bestLen=0.0
-			#now create new internal node and append child to it
-			newInternalNode=Tree()
-			node.up.children[child]=newInternalNode
-			newInternalNode.up=node.up
-			distBottom=node.dist*(1.0-bestSplit)
-			distTop=node.dist*bestSplit
-			newInternalNode.add_child(dist=distBottom,child=node)
-			node.up=newInternalNode
-			newInternalNode.add_child(dist=bestLen, name=sample)
-			newInternalNode.children[1].minorSequences=[]
-			newInternalNode.children[1].up=newInternalNode
-			newInternalNode.dist=distTop
-			newInternalNode.children[1].probVect=newPartials
-			newVect=mergeVectorsUpDown(vectUp,newInternalNode.dist,newPartials,bestLen,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.probVectUpRight=newVect
-			newInternalNode.probVectUpLeft=childBestVect
-			newVect=mergeVectors(node.probVect,node.dist,newPartials,bestLen,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.probVect=newVect
-			newVect=mergeVectorsUpDown(childBestVect,0.0,newPartials,bestLen,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.probVectTot=newVect
-			newVect=mergeVectorsUpDown(childBestVect,bestLen,newPartials,0.0,mutMatrix)
-			newVect=shorten(newVect)
-			newInternalNode.children[1].probVectTot=newVect
-			if verbose:
-				print("new internal node added to tree")
-				print(newInternalNode.probVect)
-				print(newInternalNode.probVectUpRight)
-				print(newInternalNode.probVectUpLeft)
-				print(newInternalNode.probVectTot)
-			updatePartialsFromTop(node,newInternalNode.probVectUpRight,mutMatrix)
-			updatePartialsFromBottom(newInternalNode.up,newInternalNode.probVect,child,newInternalNode,mutMatrix)
+				if bestLen>0.7*bLen*factor:
+					while bestLen<10*bLen*factor:
+						newBLen=bestLen*2
+						probChild=appendProb(parentBestVect,newPartials,newBLen,mutMatrix)
+						if probChild>LK1:
+							LK1=probChild
+							bestLen=newBLen
+						else:
+							break
+				if bestLen<0.2*bLen:
+					LK0=appendProb(parentBestVect,newPartials,0.0,mutMatrix)
+					if LK0>LK1:
+						bestLen=0.0
+				#now create new internal node and append child to it
+				# print("Inside placeSampleOnTreeNew, add node above node ")
+				# print(sample)
+				# print(bestParentSplit)
+				# print(bestLen)
+				# print(parentBestVect)
+				# print("\n")
+				newInternalNode=Tree()
+				node.up.children[child]=newInternalNode
+				newInternalNode.up=node.up
+				distBottom=node.dist*bestParentSplit
+				distTop=node.dist*(1.0-bestParentSplit)
+				newInternalNode.add_child(dist=distBottom,child=node)
+				node.up=newInternalNode
+				newInternalNode.add_child(dist=bestLen, name=sample)
+				newInternalNode.children[1].minorSequences=[]
+				newInternalNode.children[1].up=newInternalNode
+				newInternalNode.dist=distTop
+				newInternalNode.children[1].probVect=newPartials
+				newVect=mergeVectorsUpDown(vectUp,newInternalNode.dist,newPartials,bestLen,mutMatrix)
+				#newVect=shorten(newVect)
+				newInternalNode.probVectUpRight=newVect
+				newInternalNode.probVectUpLeft=parentBestVect
+				newVect=mergeVectors(node.probVect,node.dist,newPartials,bestLen,mutMatrix)
+				#newVect=shorten(newVect)
+				newInternalNode.probVect=newVect
+				newVect=mergeVectorsUpDown(vectUp,distTop/2,newInternalNode.probVect,distTop/2,mutMatrix)
+				newVect=shorten(newVect)
+				newInternalNode.probVectTotUp=newVect
+				newVect=mergeVectorsUpDown(parentBestVect,0.0,newPartials,bestLen,mutMatrix)
+				newVect=shorten(newVect)
+				newInternalNode.probVectTot=newVect
+				newVect=mergeVectorsUpDown(parentBestVect,bestLen,newPartials,0.0,mutMatrix)
+				newVect=shorten(newVect)
+				newInternalNode.children[1].probVectTot=newVect
+				if bestLen>thresholdProb4:
+					newVect=mergeVectorsUpDown(parentBestVect,bestLen/2,newPartials,bestLen/2,mutMatrix)
+					newVect=shorten(newVect)
+					newInternalNode.children[1].probVectTotUp=newVect
+				updatePesudoCounts(parentBestVect,newPartials,pseudoMutCounts)
+				if verbose:
+					print("new internal node added to tree")
+					print(newInternalNode.probVect)
+					print(newInternalNode.probVectUpRight)
+					print(newInternalNode.probVectUpLeft)
+					print(newInternalNode.probVectTot)
+				updatePartialsFromTop(node,newInternalNode.probVectUpRight,mutMatrix)
+				updatePartialsFromBottom(newInternalNode.up,newInternalNode.probVect,child,newInternalNode,mutMatrix)
 
 	return None
 
@@ -2388,15 +2571,25 @@ for d in distances:
 	newPartials=probVectTerminalNode(data[sample],0.0)
 	#print("\n")
 	#print(sample)
+	if (numSamples%5)==0:
+		mutMatrix=updateSubMatrix(pseudoMutCounts,model)
+		#print(mutMatrix)
 	if (numSamples%500)==0:
 		print("Sample num "+str(numSamples))
+		#print()
 		#print(sample)
 		#print(newPartials)
-	node , bestNewLK, isMidNode=findBestParent(t1,newPartials,sample,bLen,float('-inf'),t1,0,False)
+	node , bestNewLK, isMidNode, bestUpLK, bestDownLK, bestDownNode, LKdiff2, directChildNode, adjustBLen=findBestParent(t1,newPartials,sample,bLen,float('-inf'),t1,0,False,float('-inf'),float('-inf'),None,float('-inf'),mutMatrix, False)
 	if bestNewLK<0.5:
-		newRoot=placeSampleOnTreeNew(node,newPartials,sample,bLen,bestNewLK,isMidNode)
+		newRoot=placeSampleOnTreeNew(node,newPartials,sample,bLen,bestNewLK,isMidNode, bestUpLK, bestDownLK, bestDownNode,mutMatrix,pseudoMutCounts, adjustBLen)
 		if newRoot!=None:
 			t1=newRoot
+	#print("Updated tree")
+	#print(t1)
+	#print("\n")
+
+	#if sample=="EPI_ISL_1058154":
+	#	break
 
 print("Tree finalized")
 treeString=(t1.write()).replace(")1:","):")
@@ -2419,10 +2612,9 @@ file=open(outputFile,"w")
 file.write(treeString)
 file.close()
 print("Missed minor samples: "+str(totalMissedMinors[0]))
+print("Final Substitution matrix:")
+print(print(mutMatrix))
 exit()
-
-#1)ALLOW SAMPLE PLACEMENT IN THE MIDDLE OF LONG BRANCHES.
-#2)ESTIMATE SUBSTITUTION MODEL ON THE GO.
 
 
 #estimate susbstitution rates?
