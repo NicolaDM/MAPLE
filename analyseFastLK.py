@@ -41,7 +41,14 @@ parser.add_argument("--debug", help="Run continuously on random samples until it
 parser.add_argument("--newPhylogeny", help="Estimate a brand new phylogeny from the data.", action="store_true")
 parser.add_argument("--runPhyml", help="Compare likelihood and running time with PhyML when subsampling.", action="store_true")
 parser.add_argument("--runIQtree", help="Compare likelihood and running time with IQ-TREE when subsampling.", action="store_true")
+parser.add_argument("--runFastTree", help="Compare likelihood and running time with fastTree when subsampling.", action="store_true")
+parser.add_argument("--runFastLK", help="Estimate phylogeny with new fast LK.", action="store_true")
+parser.add_argument("--allowedFails",help="How many decreases in lk are allowed before stopping looking for placement.",  type=int, default=2)
+parser.add_argument("--thresholdLogLK",help="Keep looking for best placement until you are this far from the best lk so far.",  type=float, default=30.0)
+parser.add_argument("--bLenAdjustment",help="Try also placements with this appending branch length.",  type=int, default=10)
+parser.add_argument("--bLenFactor",help="split branch length by this factor when looking for best child of best node.",  type=float, default=2.0)
 args = parser.parse_args()
+
 
 createDiffFile=args.createDiffFile
 reduceDiffFile=args.reduceDiffFile
@@ -58,7 +65,12 @@ debug=args.debug
 newPhylogeny=args.newPhylogeny
 runPhyml=args.runPhyml
 runIQtree=args.runIQtree
-
+runFastLK=args.runFastLK
+allowedFails=args.allowedFails
+thresholdLogLK=args.thresholdLogLK
+bLenAdjustment=args.bLenAdjustment
+bLenFactor=args.bLenFactor
+runFastTree=args.runFastTree
 random.seed(a=seed)
 
 pathSimu=args.path
@@ -1278,7 +1290,7 @@ def appendProb(probVectP,probVectC,bLen):
 	return Lkcost-LkcostOriginal
 
 totalMissedMinors=[0]
-allowedFails=3
+#allowedFails=3
 def findBestParent(t1,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses):
 	if t1.is_leaf():
 		#print("Trying to place on leaf "+str(t1.dist))
@@ -3482,9 +3494,7 @@ def assessLKwithIQtree(treeFile,folder,phylipFile,runName):
 
 if subsampleTreeInference>0:
 	refName=pathSimu+"EPI_ISL_402124_lowercase.fasta"
-	#if debug:	
-	debugFileName=pathSimu+"lkFile_debug_"+str(subsampleTreeInference)+".txt"
-	debugFile=open(debugFileName,"w")
+	#if debug:
 	#timesFastLKJC=[]
 	timesFastLK=[]
 	#timesIQtreeJC=[]
@@ -3524,6 +3534,7 @@ if subsampleTreeInference>0:
 	#lksFastTreeGTRslow=[]
 	#lksFastTreeGTRfast=[]
 	#"subsample" genomes in the dataset, and compare tree inference between the fastLK approach and other methods
+	totalFastLK=0.0
 	for repeat in range(nRepeats):
 		random.seed(seed+repeat)
 		newSamples=random.sample(samples,subsampleTreeInference)
@@ -3543,57 +3554,64 @@ if subsampleTreeInference>0:
 						fileO.write(m[0]+"\t"+str(m[1])+"\t"+str(m[2])+"\n")
 		fileO.close()
 		
-		if debug:
-			phylipFile=pathSimu+"phylipFile_debug_"+str(subsampleTreeInference)+"samples.phy"
-			fastaFile=pathSimu+"fastaFile_debug_"+str(subsampleTreeInference)+"samples.fa"
-		else:
-			phylipFile=pathSimu+"phylipFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.phy"
-			fastaFile=pathSimu+"fastaFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.fa"
-		fileFa=open(fastaFile,"w")
-		fileO=open(phylipFile,"w")
-		lRef=len(ref)
-		fileO.write(str(subsample)+"\t"+str(lRef)+"\n")
-		for s in newSamples:
-			fileO.write(s+" ")
-			fileFa.write(">"+s+"\n")
-			refList=list(ref)
-			for m in data[s]:
-				if len(m)==2:
-					refList[m[1]-1]=m[0]
-				else:
-					for i in range(m[2]):
-						refList[m[1]+i-1]=m[0]
-			seq="".join(refList)
-			fileO.write(seq+"\n")
-			fileFa.write(seq+"\n")
-		fileO.close()
-		fileFa.close()
+		if runIQtree:
+			if debug:
+				phylipFile=pathSimu+"phylipFile_debug_"+str(subsampleTreeInference)+"samples.phy"
+				fastaFile=pathSimu+"fastaFile_debug_"+str(subsampleTreeInference)+"samples.fa"
+			else:
+				phylipFile=pathSimu+"phylipFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.phy"
+				fastaFile=pathSimu+"fastaFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.fa"
+			fileFa=open(fastaFile,"w")
+			fileO=open(phylipFile,"w")
+			lRef=len(ref)
+			fileO.write(str(subsample)+"\t"+str(lRef)+"\n")
+			for s in newSamples:
+				fileO.write(s+" ")
+				fileFa.write(">"+s+"\n")
+				refList=list(ref)
+				for m in data[s]:
+					if len(m)==2:
+						refList[m[1]-1]=m[0]
+					else:
+						for i in range(m[2]):
+							refList[m[1]+i-1]=m[0]
+				seq="".join(refList)
+				fileO.write(seq+"\n")
+				fileFa.write(seq+"\n")
+			fileO.close()
+			fileFa.close()
 
-		#Run fast likelihood
-		print("Starting new Felsenstein iterative placement repeat "+str(repeat)+" with "+str(subsample)+" random samples ")
-		if debug:
-			fastLKtreeName="fastLKtree_debug_"+str(subsampleTreeInference)+"samples.tree"
-		else:
-			fastLKtreeName="fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.tree"
-		start = time.time()
-		os.system("python3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/estimatePhylogenyIterativeFastLK.py --path "+pathSimu+" --input "+diffFile+" --output "+fastLKtreeName)
-		timesFastLK.append(time.time() - start)
-		print("Time for fastLK: "+str(timesFastLK[-1]))
-		if debug:
-			lksFastLK.append(assessLKwithIQtree(fastLKtreeName,pathSimu,phylipFile,"fastLKtree_debug_"+str(subsampleTreeInference)+"samples"))
-		else:
-			lksFastLK.append(assessLKwithIQtree(fastLKtreeName,pathSimu,phylipFile,"fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples"))
-		print(lksFastLK[-1])
-		print("\n")
-		baseLK=lksFastLK[-1][0]
-		debugFile.write("fastLK repeat "+str(repeat+1)+" lk: "+str(baseLK)+"\n")
+		if runFastLK or runFastTree:
+			debugFileName=pathSimu+"lkFile_debub_samples"+str(subsampleTreeInference)+"_allowedFails"+str(allowedFails)+"_lkThreshold"+str(thresholdLogLK)+"_bLenAdjust"+str(bLenAdjustment)+"_bLenFactor"+str(bLenFactor)+".txt"
+			debugFile=open(debugFileName,"w")
+			#Run fast likelihood
+			print("Starting new Felsenstein iterative placement repeat "+str(repeat)+" with "+str(subsample)+" random samples ")
+			if debug:
+				fastLKtreeName="fastLKtree_debug_"+str(subsampleTreeInference)+"samples.tree"
+			else:
+				fastLKtreeName="fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.tree"
+			start = time.time()
+			os.system("python3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/estimatePhylogenyIterativeFastLK.py --path "+pathSimu+" --input "+diffFile+" --allowedFails "+str(allowedFails)+" --thresholdLogLK "+str(thresholdLogLK)+" --bLenAdjustment "+str(bLenAdjustment)+" --bLenFactor "+str(bLenFactor)+" --output "+fastLKtreeName)
+			timesFastLK.append(time.time() - start)
+			print("Time for fastLK: "+str(timesFastLK[-1]))
+			if debug:
+				lksFastLK.append(assessLKwithIQtree(fastLKtreeName,pathSimu,phylipFile,"fastLKtree_debug_"+str(subsampleTreeInference)+"samples"))
+			else:
+				lksFastLK.append(assessLKwithIQtree(fastLKtreeName,pathSimu,phylipFile,"fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples"))
+			print(lksFastLK[-1])
+			print("\n")
+			baseLK=lksFastLK[-1][0]
+			debugFile.write("fastLK repeat "+str(repeat+1)+" lk: "+str(baseLK)+" time: "+str(timesFastLK[-1])+"\n")
+			totalFastLK+=baseLK
 
 		# fastLKJCtreeName="fastLKtreeJC_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.tree"
 		# os.system("python3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/estimatePhylogenyIterativeFastLK.py --path "+pathSimu+" --useJC --input "+diffFile+" --output "+fastLKJCtreeName)
 		
 
-		runIQtree=True
+		#runIQtree=True
 		if runIQtree:
+			debugFileNameIQtree=pathSimu+"lkFile_debug_"+str(subsampleTreeInference)+"_IQtree.txt"
+			debugFileIQtree=open(debugFileNameIQtree,"w")
 
 			if debug:
 				IQtreeName="IQtree_debug_"+str(subsampleTreeInference)+"samples"
@@ -3630,12 +3648,12 @@ if subsampleTreeInference>0:
 			print(lksIQtree2GTRfast[-1])
 			print("\n")
 			iqLK=lksIQtree2GTRfast[-1][0]
-			debugFile.write("IQtree fast repeat "+str(repeat+1)+" lk: "+str(iqLK)+"\n")
+			debugFileIQtree.write("IQtree fast repeat "+str(repeat+1)+" lk: "+str(iqLK)+" time: "+str(timesIQtree2GTRfast[-1])+"\n")
 			if debug:
-				if iqLK>baseLK+6.0:
+				if iqLK>baseLK+10.0:
 					print("significant difference in LK between fastLK and iqtree, seed "+str(seed+repeat))
 					exit()
-				if baseLK>iqLK+6.0:
+				if baseLK>iqLK+10.0:
 					print("significant difference in LK between fastLK and iqtree, with fastLK being better, seed "+str(seed+repeat))
 					exit()
 
@@ -3664,7 +3682,6 @@ if subsampleTreeInference>0:
 			#print("Starting IQtree, estimate bLengths")
 			#os.system("/Applications/iqtree-1.6.12-MacOSX/bin/iqtree -s "+pathSimu+"2021-03-31_"+string+".phylip -st DNA -te "+pathSimu+"2021-03-31_"+string+".tree -pre "+string+"_iqtree1_bLen -nt 1 -keep-ident -m GTR\{0.04,0.3,0.1,0.02,1.0,1.0\}+FQ -quiet -redo ")
 
-		runFastTree=False
 		if runFastTree:
 
 			if debug:
@@ -3711,7 +3728,8 @@ if subsampleTreeInference>0:
 			# print("Starting fasttree GTR slowest with fastFelsenstein initial tree")
 			# os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -gtr -intree "+fastLKtreeName+" -nocat < "+fastaFile+" > "+pathSimu+fasttreeName+"_GTRslowestfastLK.tree")
 
-
+	debugFile.write("fastLK total lk: "+str(totalFastLK)+" \n")
+	print("\n \n fastLK total lk: "+str(totalFastLK)+" \n")
 
 
 			
