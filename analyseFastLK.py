@@ -26,6 +26,8 @@ from ete3 import Tree
 
 parser = argparse.ArgumentParser(description='Run estimation of mutation rates and synonymous site selection from SARS-CoV-2 data, and generate plots.')
 parser.add_argument('--path',default="", help='path where to find files and plot results.')
+parser.add_argument('--refName',default="EPI_ISL_402124_lowercase.fasta", help='name of the reference genome file.')
+parser.add_argument('--conciseAlignment',default="2021-03-31_unmasked_differences_reduced.txt", help='name of the concise alignment file.')
 parser.add_argument("--createDiffFile", help="create a concise file replacing a MSA.", action="store_true")
 parser.add_argument("--reduceDiffFile", help="Reduce the size of a concise file by only including samples in the tree.", action="store_true")
 parser.add_argument("--onlyNambiguities", help="Treat all ambiguities as N (total missing information).", action="store_true")
@@ -47,6 +49,7 @@ parser.add_argument("--allowedFails",help="How many decreases in lk are allowed 
 parser.add_argument("--thresholdLogLK",help="Keep looking for best placement until you are this far from the best lk so far.",  type=float, default=30.0)
 parser.add_argument("--bLenAdjustment",help="Try also placements with this appending branch length.",  type=int, default=10)
 parser.add_argument("--bLenFactor",help="split branch length by this factor when looking for best child of best node.",  type=float, default=2.0)
+parser.add_argument("--createConsensus", help="Create a new reference genome made of the consensus of all genomes.", action="store_true")
 args = parser.parse_args()
 
 
@@ -71,6 +74,9 @@ thresholdLogLK=args.thresholdLogLK
 bLenAdjustment=args.bLenAdjustment
 bLenFactor=args.bLenFactor
 runFastTree=args.runFastTree
+createConsensus=args.createConsensus
+refInputName=args.refName
+conciseAlignment=args.conciseAlignment
 random.seed(a=seed)
 
 pathSimu=args.path
@@ -110,7 +116,7 @@ def collectReference(fileName):
 	return ref, cumulativeBases, rootFreqs, rootFreqsLog
 
 
-ref, cumulativeBases, rootFreqs, rootFreqsLog = collectReference(pathSimu+"EPI_ISL_402124_lowercase.fasta")
+ref, cumulativeBases, rootFreqs, rootFreqsLog = collectReference(pathSimu+refInputName)
 lRef=len(ref)
 
 #print(ref[21985:21989])
@@ -243,7 +249,7 @@ if reduceDiffFile:
 	print(found)
 	print(nFound)
 	
-	fileO=open(pathSimu+"2021-03-31_unmasked_differences_reduced.txt","w")
+	fileO=open(pathSimu+conciseAlignment,"w")
 	for k in dataReduced.keys():
 		fileO.write(">"+k+"\n")
 		for m in dataReduced[k]:
@@ -257,7 +263,7 @@ if reduceDiffFile:
 	#971 sequences not found
 else:
 	#read sequence data from file
-	data=readConciseAlignment(pathSimu+"2021-03-31_unmasked_differences_reduced.txt")
+	data=readConciseAlignment(pathSimu+conciseAlignment)
 
 
 samples=data.keys()
@@ -3302,7 +3308,7 @@ def logLKdiff(data,newSamples,string,ref):
 		#else:
 		dataSample=readConciseAlignment(pathSimu+"2021-03-31_"+string+".txt")
 		#print(dataSample)
-		ref, cumulativeBases, rootFreqs, rootFreqsLog = collectReference(pathSimu+"EPI_ISL_402124_lowercase.fasta")
+		ref, cumulativeBases, rootFreqs, rootFreqsLog = collectReference(pathSimu+refInputName)
 		lRef=len(ref)
 		#if debug:
 		#	phylo2 = Tree(pathSimu+"2021-03-31_debugging.tree")
@@ -3488,12 +3494,80 @@ def assessLKwithIQtree(treeFile,folder,phylipFile,runName):
 
 	return [lkGTR]
 
+charValues={"b":0,"h":0,"v":0,"d":0,"m":0,"k":0,"s":0,"w":0,"r":0,"y":0,"n":0,"-":0,"a":1,"c":2,"g":3,"t":4}
+if createConsensus:
+	consunsusFileName=pathSimu+conciseAlignment+"_consensus.fa"
+	fileO=open(consunsusFileName,"w")
+	lRef=len(ref)
+	nSeqs=len(samples)
+	countsRef=np.zeros((lRef,5),dtype=int)
+	for s in samples:
+		#refList=list(ref)
+		for m in data[s]:
+			if len(m)==2:
+				#refList[m[1]-1]=m[0]
+				countsRef[m[1]-1,charValues[m[0]]]+=1
+			else:
+				if m[0]!="-" and m[0]!="n":
+					print(m)
+					exit()
+				for i in range(m[2]):
+					#refList[m[1]+i-1]=m[0]
+					countsRef[m[1]+i-1,0]+=1
+	refList=list(ref)
+	for i in range(lRef):
+		iRef=charValues[ref[i]]
+		countsRef[i,iRef]+=(nSeqs-np.sum(countsRef[i,:]))
+		maxI=0
+		maxV=0
+		for j in range(4):
+			if countsRef[i,j+1]>maxV:
+				maxV=countsRef[i,j+1]
+				maxI=j
+		refList[i]=allelesListLow[maxI]
+	print(countsRef)
+	print(nSeqs)
+	#print(countsRef[10000:10005,:])
+	fileO.write(">consensus\n")
+	seq="".join(refList)
+	fileO.write(seq+"\n")
+	fileO.close()
 
+	refDiffs=[]
+	for i in range(lRef):
+		if seq[i]!=ref[i]:
+			refDiffs.append([i+1,seq[i]])
+	print(refDiffs)
 
+	consunsusFileName=pathSimu+conciseAlignment+"_consensus-based.txt"
+	fileO=open(consunsusFileName,"w")
+	for s in samples:
+		fileO.write(">"+s+"\n")
+		refIndex=0
+		currentPos=1
+		for m in data[s]:
+			while refIndex<len(refDiffs) and m[1]>refDiffs[refIndex][0]:
+				fileO.write(ref[refDiffs[refIndex][0]-1]+"\t"+str(refDiffs[refIndex][0])+"\n")
+				refIndex+=1
+			if len(m)==2:
+				if refIndex==len(refDiffs):
+					fileO.write(m[0]+"\t"+str(m[1])+"\n")
+				else:
+					if m[1]==refDiffs[refIndex][0]:
+						if refDiffs[refIndex][1]!=m[0]:
+							fileO.write(m[0]+"\t"+str(m[1])+"\n")
+						refIndex+=1
+					else:
+						fileO.write(m[0]+"\t"+str(m[1])+"\n")
+			else:
+				fileO.write(m[0]+"\t"+str(m[1])+"\t"+str(m[2])+"\n")
+				while refIndex<len(refDiffs) and (m[1]+m[2])>refDiffs[refIndex][0]:
+					refIndex+=1
+	fileO.close()
 
 
 if subsampleTreeInference>0:
-	refName=pathSimu+"EPI_ISL_402124_lowercase.fasta"
+	refName=pathSimu+refInputName
 	#if debug:
 	#timesFastLKJC=[]
 	timesFastLK=[]
@@ -3535,6 +3609,7 @@ if subsampleTreeInference>0:
 	#lksFastTreeGTRfast=[]
 	#"subsample" genomes in the dataset, and compare tree inference between the fastLK approach and other methods
 	totalFastLK=0.0
+	totalFastTime=0.0
 	for repeat in range(nRepeats):
 		random.seed(seed+repeat)
 		newSamples=random.sample(samples,subsampleTreeInference)
@@ -3554,34 +3629,34 @@ if subsampleTreeInference>0:
 						fileO.write(m[0]+"\t"+str(m[1])+"\t"+str(m[2])+"\n")
 		fileO.close()
 		
-		if runIQtree:
-			if debug:
-				phylipFile=pathSimu+"phylipFile_debug_"+str(subsampleTreeInference)+"samples.phy"
-				fastaFile=pathSimu+"fastaFile_debug_"+str(subsampleTreeInference)+"samples.fa"
-			else:
-				phylipFile=pathSimu+"phylipFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.phy"
-				fastaFile=pathSimu+"fastaFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.fa"
-			fileFa=open(fastaFile,"w")
-			fileO=open(phylipFile,"w")
-			lRef=len(ref)
-			fileO.write(str(subsample)+"\t"+str(lRef)+"\n")
-			for s in newSamples:
-				fileO.write(s+" ")
-				fileFa.write(">"+s+"\n")
-				refList=list(ref)
-				for m in data[s]:
-					if len(m)==2:
-						refList[m[1]-1]=m[0]
-					else:
-						for i in range(m[2]):
-							refList[m[1]+i-1]=m[0]
-				seq="".join(refList)
-				fileO.write(seq+"\n")
-				fileFa.write(seq+"\n")
-			fileO.close()
-			fileFa.close()
+		#if runIQtree or runFastTree:
+		if debug:
+			phylipFile=pathSimu+"phylipFile_debug_"+str(subsampleTreeInference)+"samples.phy"
+			fastaFile=pathSimu+"fastaFile_debug_"+str(subsampleTreeInference)+"samples.fa"
+		else:
+			phylipFile=pathSimu+"phylipFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.phy"
+			fastaFile=pathSimu+"fastaFile_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.fa"
+		fileFa=open(fastaFile,"w")
+		fileO=open(phylipFile,"w")
+		lRef=len(ref)
+		fileO.write(str(subsample)+"\t"+str(lRef)+"\n")
+		for s in newSamples:
+			fileO.write(s+" ")
+			fileFa.write(">"+s+"\n")
+			refList=list(ref)
+			for m in data[s]:
+				if len(m)==2:
+					refList[m[1]-1]=m[0]
+				else:
+					for i in range(m[2]):
+						refList[m[1]+i-1]=m[0]
+			seq="".join(refList)
+			fileO.write(seq+"\n")
+			fileFa.write(seq+"\n")
+		fileO.close()
+		fileFa.close()
 
-		if runFastLK or runFastTree:
+		if runFastLK:
 			debugFileName=pathSimu+"lkFile_debub_samples"+str(subsampleTreeInference)+"_allowedFails"+str(allowedFails)+"_lkThreshold"+str(thresholdLogLK)+"_bLenAdjust"+str(bLenAdjustment)+"_bLenFactor"+str(bLenFactor)+".txt"
 			debugFile=open(debugFileName,"w")
 			#Run fast likelihood
@@ -3591,8 +3666,10 @@ if subsampleTreeInference>0:
 			else:
 				fastLKtreeName="fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.tree"
 			start = time.time()
-			os.system("python3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/estimatePhylogenyIterativeFastLK.py --path "+pathSimu+" --input "+diffFile+" --allowedFails "+str(allowedFails)+" --thresholdLogLK "+str(thresholdLogLK)+" --bLenAdjustment "+str(bLenAdjustment)+" --bLenFactor "+str(bLenFactor)+" --output "+fastLKtreeName)
-			timesFastLK.append(time.time() - start)
+			os.system("pypy3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/estimatePhylogenyIterativeFastLK.py --path "+pathSimu+" --reference "+refInputName+" --input "+diffFile+" --allowedFails "+str(allowedFails)+" --thresholdLogLK "+str(thresholdLogLK)+" --bLenAdjustment "+str(bLenAdjustment)+" --bLenFactor "+str(bLenFactor)+" --output "+fastLKtreeName)
+			runTime=time.time() - start
+			timesFastLK.append(runTime)
+			totalFastTime+=runTime
 			print("Time for fastLK: "+str(timesFastLK[-1]))
 			if debug:
 				lksFastLK.append(assessLKwithIQtree(fastLKtreeName,pathSimu,phylipFile,"fastLKtree_debug_"+str(subsampleTreeInference)+"samples"))
@@ -3728,8 +3805,8 @@ if subsampleTreeInference>0:
 			# print("Starting fasttree GTR slowest with fastFelsenstein initial tree")
 			# os.system("cd "+pathSimu+" ; /Applications/FastTree/FastTree -quiet -nosupport -nt -gtr -intree "+fastLKtreeName+" -nocat < "+fastaFile+" > "+pathSimu+fasttreeName+"_GTRslowestfastLK.tree")
 
-	debugFile.write("fastLK total lk: "+str(totalFastLK)+" \n")
-	print("\n \n fastLK total lk: "+str(totalFastLK)+" \n")
+	debugFile.write("fastLK total lk: "+str(totalFastLK)+" in total time: "+str(totalFastTime)+"\n")
+	print("\n \n fastLK total lk: "+str(totalFastLK)+" in total time: "+str(totalFastTime)+" \n")
 
 
 			
@@ -3739,14 +3816,9 @@ if subsampleTreeInference>0:
 
 
 
-
-
-
-#estimate susbstitution rates?
 #optimize branch lengths?
 #Optimize root position?
 #Calculate pairwise distances?
-#reduce tree by removing sequences that are basically identical to others?
 #try to improve topology?
 
 exit()
@@ -3754,59 +3826,6 @@ exit()
 
 
 
-
-
-
-
-#for the root, finalize the partial likelihood by multiplying by root frequencies, and return new vector (only affects O states)
-#OBSOLETE - now using rootVector0 which uses the new format and tracks of which entries need to be multiplied by root frequencies.
-# def multipyByRootProbs(probVect,rootFreqs):
-# 	newProbVect=[]
-# 	for entry in probVect:
-# 		newEntry=list(entry)
-# 		if entry[0]=="O":
-# 			newEntry[4]=np.ones(4)
-# 			for i in range4:
-# 				newEntry[4][i]=entry[4][i]*rootFreqs[i]
-# 		newProbVect.append(newEntry)
-# 	return newProbVect
-
-
-#for the root, finalize the likelihood and also return a vector of the root probability of each state
-#OBSOLETE!
-# def finalLKwithVector(probVect,ref,rootFreqsLog,rootFreqs,bLen):
-# 	logLK=0.0
-# 	newProbVect=[]
-# 	for entry in probVect:
-# 		#if entry[3]<thresholdProb:
-# 			#approximate assuming the distance is 0.0
-# 			if entry[0]=="R":
-# 				pos=entry[1]
-# 				end=entry[2]+pos-1
-# 				for i in range(4):
-# 					logLK+=rootFreqsLog[i]*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
-# 				newProbVect.append(("R",pos,entry[2],entry[3]+bLen))
-# 			elif entry[0]=="N":
-# 				newProbVect.append(("N",entry[1],entry[2],0.0))
-# 			elif entry[0]=="O":
-# 				#tot=0.0
-# 				newProbVect.append(("O",entry[1],entry[2],0.0,[]))
-# 				for i in range(4):
-# 					#tot+=rootFreqs[i]*entry[4][i]
-# 					tot=0.0
-# 					for j in range4:
-# 						if i==j:
-# 							tot+=rootFreqs[i]*(1.0+mutMatrix[i][i]*(entry[3]+bLen))*entry[4][j]
-# 						else:
-# 							tot+=rootFreqs[i]*mutMatrix[i][j]*(entry[3]+bLen)*entry[4][j]
-# 					#newProbVect[-1][4].append(rootFreqs[i]*entry[4][i])
-# 					newProbVect[-1][4].append(tot)
-# 				#logLK+=math.log(tot)
-# 			else:
-# 				i1=alleles[entry[0]]
-# 				newProbVect.append((entry[0],entry[1],entry[2],entry[3]+bLen))
-# 				logLK+=rootFreqsLog[i1]
-# 	return logLK, newProbVect
 
 
 #we know that sample "sample", with partials "newPartials", is best placed as child of node resulting in logLK contribution of newChildLK
@@ -3987,6 +4006,547 @@ def placeSampleOnTreeOld(node,newPartials,sample,bLen,newChildLK):
 			#print("updatePartialsFromBottom from leaf")
 			updatePartialsFromBottom(newInternalNode.up,newInternalNode.probVect,child,None,mutMatrix)
 		return None
+
+
+#function to calculate likelihood cost of appending child to parent
+def appendProbPrecise(probVectP,probVectC,bLen,mutMatrix):
+	Lkcost=0.0
+	#LkcostOriginal=0.0
+	indexEntry1=0
+	indexEntry2=0
+	pos=1
+	entry1=probVectP[indexEntry1]
+	pos1=entry1[1]
+	if entry1[0]!="N" and entry1[0]!="R":
+		end1=pos1
+	else:
+		end1=pos1+entry1[2]-1
+	entry2=probVectC[indexEntry2]
+	pos2=entry2[1]
+	if entry2[0]!="N" and entry2[0]!="R":
+		end2=pos2
+	else:
+		end2=pos2+entry2[2]-1
+	end=end1
+	if end2<end:
+		end=end2
+	length=end+1-pos
+	while True:
+		if entry1[0]=="N":
+			if not entry1[4]:
+				print("Warning, should have been True")
+			if entry2[0]=="N":
+				pass
+			elif entry2[0]=="R":
+				for i in range4:
+					Lkcost+=rootFreqsLog[i]*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
+			elif entry2[0]=="O":
+				tot=0.0
+				for i in range4:
+					tot+=rootFreqs[i]*entry2[4][i]
+				Lkcost+=log(tot)
+			else:
+				i2=alleles[entry2[0]]
+				Lkcost+=rootFreqsLog[i2]
+		elif entry2[0]=="N":
+			pass
+		elif entry1[0]=="R":
+			if entry2[0]=="R":
+				if entry1[4]:
+					for i in range4:
+						Lkcost+=mutMatrix[i][i]*(bLen+entry1[3]+entry1[5])*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
+				else:
+					for i in range4:
+						Lkcost+=mutMatrix[i][i]*(bLen+entry1[3])*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
+			elif entry2[0]=="O":
+				i1=allelesLow[ref[pos-1]]
+				tot=0.0
+				if entry1[4]:
+					for i in range4:
+						if i1==i:
+							tot2=rootFreqs[i]*(1.0+mutMatrix[i][i1]*entry1[3])
+						else:
+							tot2=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]
+						tot3=0.0
+						for j in range4:
+							if i!=j:
+								tot3+=mutMatrix[i][j]*(bLen+entry1[5])*entry2[4][j]
+							else:
+								tot3+=(1.0+mutMatrix[i][j]*(bLen+entry1[5]))*entry2[4][j]
+						tot2=tot2*tot3
+						tot+=tot2
+					if tot>sys.float_info.min:
+						Lkcost+=log(tot/rootFreqs[i1])
+					else:
+						return float("-inf")
+				else:
+					for j in range4:
+						if i1!=j:
+							tot+=mutMatrix[i1][j]*(bLen+entry1[3])*entry2[4][j]
+						else:
+							tot+=(1.0+mutMatrix[i1][j]*(bLen+entry1[3]))*entry2[4][j]
+					if tot>sys.float_info.min:
+						Lkcost+=log(tot)
+					else:
+						return float("-inf")
+			else:
+				if entry1[4]:
+					if (bLen+entry1[3]+entry1[5])<thresholdProb2:
+						return float("-inf")
+					i2=alleles[entry2[0]]
+					i1=allelesLow[ref[pos-1]]
+					tot=0.0
+					for i in range4:
+						if i1==i:
+							tot+=rootFreqs[i]*(1.0+mutMatrix[i][i1]*entry1[3])*mutMatrix[i][i2]*(entry1[5]+bLen)
+						elif i2==i:
+							tot+=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]*(1.0+mutMatrix[i][i2]*(entry1[5]+bLen))
+						else:
+							tot+=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]*mutMatrix[i][i2]*(entry1[5]+bLen)
+					Lkcost+=log(tot/rootFreqs[i1])
+				else:
+					if (bLen+entry1[3])<thresholdProb2:
+						return float("-inf")
+					i2=alleles[entry2[0]]
+					i1=allelesLow[ref[pos-1]]
+					Lkcost+=log(mutMatrix[i1][i2]*(bLen+entry1[3]))
+		elif entry1[0]=="O":
+			tot1=0.0
+			for i in range4:
+				tot1+=entry1[4][i]
+			#LkcostOriginal+=log(tot1)
+			if entry2[0]=="O":
+				tot=0.0
+				for i in range4:
+					for j in range4:
+						if i==j:
+							tot+=(1.0+mutMatrix[i][i]*(bLen+entry1[3]))*entry1[4][i]*entry2[4][j]
+						else:
+							tot+=mutMatrix[i][j]*(bLen+entry1[3])*entry1[4][i]*entry2[4][j]
+				if tot>sys.float_info.min:
+					Lkcost+=log(tot/tot1)
+				else:
+					return float("-inf")
+			else:
+				if entry2[0]=="R":
+					i2=allelesLow[ref[pos-1]]
+				else:
+					i2=alleles[entry2[0]]
+				tot=0.0
+				for i in range4:
+					if i==i2:
+						tot+=entry1[4][i]*(1.0+mutMatrix[i][i]*(bLen+entry1[3]))
+					else:
+						tot+=entry1[4][i]*mutMatrix[i][i2]*(bLen+entry1[3])
+				if tot>sys.float_info.min:
+					Lkcost+=log(tot/tot1)
+				else:
+					return float("-inf")
+		#entry1 is a non-ref nuc
+		else:
+			i1=alleles[entry1[0]]
+			if entry2[0]==entry1[0]:
+				if entry1[4]:
+					Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3]+entry1[5])
+				else:
+					Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3])
+			else:
+				if entry2[0]=="O":
+					tot=0.0
+					if entry1[4]:
+						for i in range4:
+							if i1==i:
+								tot2=rootFreqs[i]*(1.0+mutMatrix[i][i1]*entry1[3])
+							else:
+								tot2=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]
+							tot3=0.0
+							for j in range4:
+								if i!=j:
+									tot3+=mutMatrix[i][j]*(bLen+entry1[5])*entry2[4][j]
+								else:
+									tot3+=(1.0+mutMatrix[i][j]*(bLen+entry1[5]))*entry2[4][j]
+							tot2=tot2*tot3
+							tot+=tot2
+						if tot>sys.float_info.min:
+							Lkcost+=log(tot/rootFreqs[i1])
+						else:
+							return float("-inf")
+					else:
+						for j in range4:
+							if i1==j:
+								tot+=(1.0+mutMatrix[i1][i1]*(bLen+entry1[3]))*entry2[4][j]
+							else:
+								tot+=mutMatrix[i1][j]*(bLen+entry1[3])*entry2[4][j]
+						if tot>sys.float_info.min:
+							Lkcost+=log(tot)
+						else:
+							return float("-inf")
+
+				else:
+					if entry1[4]:
+						if (bLen+entry1[3]+entry1[5])<thresholdProb2:
+							return float("-inf")
+						if entry2[0]=="R":
+							i2=allelesLow[ref[pos-1]]
+						else:
+							i2=alleles[entry2[0]]
+						tot=0.0
+						for i in range4:
+							if i1==i:
+								tot+=rootFreqs[i]*(1.0+mutMatrix[i][i1]*entry1[3])*mutMatrix[i][i2]*(entry1[5]+bLen)
+							elif i2==i:
+								tot+=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]*(1.0+mutMatrix[i][i2]*(entry1[5]+bLen))
+							else:
+								tot+=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]*mutMatrix[i][i2]*(entry1[5]+bLen)
+						Lkcost+=log(tot/rootFreqs[i1])
+					else:
+						if (bLen+entry1[3])<thresholdProb2:
+							return float("-inf")
+						if entry2[0]=="R":
+							i2=allelesLow[ref[pos-1]]
+						else:
+							i2=alleles[entry2[0]]
+						Lkcost+=log(mutMatrix[i1][i2]*(bLen+entry1[3]))
+
+		pos+=length
+		if pos>lRef:
+			break
+		if pos>end1:
+			indexEntry1+=1
+			entry1=probVectP[indexEntry1]
+			pos1=entry1[1]
+			if entry1[0]!="N" and entry1[0]!="R":
+				end1=pos1
+			else:
+				end1=pos1+entry1[2]-1
+		if pos>end2:
+			indexEntry2+=1
+			entry2=probVectC[indexEntry2]
+			pos2=entry2[1]
+			if entry2[0]!="N" and entry2[0]!="R":
+				end2=pos2
+			else:
+				end2=pos2+entry2[2]-1
+		end=end1
+		if end2<end:
+			end=end2
+		length=end+1-pos
+	return Lkcost 
+	#-LkcostOriginal
+
+#function to calculate likelihood cost of appending child to parent
+def appendProbOld(probVectP,probVectC,bLen,mutMatrix):
+	Lkcost=0.0
+	LkcostOriginal=0.0
+	indexEntry1=0
+	indexEntry2=0
+	pos=1
+	entry1=probVectP[indexEntry1]
+	pos1=entry1[1]
+	if entry1[0]!="N" and entry1[0]!="R":
+		end1=pos1
+	else:
+		end1=pos1+entry1[2]-1
+	entry2=probVectC[indexEntry2]
+	pos2=entry2[1]
+	if entry2[0]!="N" and entry2[0]!="R":
+		end2=pos2
+	else:
+		end2=pos2+entry2[2]-1
+	end=end1
+	if end2<end:
+		end=end2
+	length=end+1-pos
+	while True:
+		if entry1[0]=="N":
+			if not entry1[4]:
+				print("Warning, should have been True")
+			if entry2[0]=="N":
+				pass
+			elif entry2[0]=="R":
+				for i in range4:
+					Lkcost+=rootFreqsLog[i]*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
+			elif entry2[0]=="O":
+				tot=0.0
+				for i in range4:
+					tot+=rootFreqs[i]*entry2[4][i]
+				Lkcost+=log(tot)
+			else:
+				i2=alleles[entry2[0]]
+				Lkcost+=rootFreqsLog[i2]
+		elif entry2[0]=="N":
+			pass
+		elif entry1[0]=="R":
+			if entry2[0]=="R":
+					for i in range4:
+						Lkcost+=mutMatrix[i][i]*bLen*(cumulativeBases[end][i]-cumulativeBases[pos-1][i])
+			elif entry2[0]=="O":
+				i1=allelesLow[ref[pos-1]]
+				tot=0.0
+				for j in range4:
+					if i1!=j:
+						tot+=mutMatrix[i1][j]*bLen*entry2[4][j]
+					else:
+						tot+=(1.0+mutMatrix[i1][j]*bLen)*entry2[4][j]
+				if tot>sys.float_info.min:
+					Lkcost+=log(tot)
+				else:
+					return float("-inf")
+			else:
+				if bLen<thresholdProb2:
+					return float("-inf")
+				i2=alleles[entry2[0]]
+				i1=allelesLow[ref[pos-1]]
+				Lkcost+=log(mutMatrix[i1][i2]*bLen)
+		elif entry1[0]=="O":
+			tot1=0.0
+			for i in range4:
+				tot1+=entry1[4][i]
+			LkcostOriginal+=log(tot1)
+			if entry2[0]=="O":
+				tot=0.0
+				for i in range4:
+					for j in range4:
+						if i==j:
+							tot+=(1.0+mutMatrix[i][i]*bLen)*entry1[4][i]*entry2[4][j]
+						else:
+							tot+=mutMatrix[i][j]*bLen*entry1[4][i]*entry2[4][j]
+				if tot>sys.float_info.min:
+					Lkcost+=log(tot)
+				else:
+					return float("-inf")
+			else:
+				if entry2[0]=="R":
+					i2=allelesLow[ref[pos-1]]
+				else:
+					i2=alleles[entry2[0]]
+				tot=0.0
+				for i in range4:
+					if i==i2:
+						tot+=entry1[4][i]*(1.0+mutMatrix[i][i]*bLen)
+					else:
+						tot+=entry1[4][i]*mutMatrix[i][i2]*bLen
+				if tot>sys.float_info.min:
+					Lkcost+=log(tot)
+				else:
+					return float("-inf")
+		#entry1 is a non-ref nuc
+		else:
+			i1=alleles[entry1[0]]
+			if entry2[0]==entry1[0]:
+				Lkcost+=mutMatrix[i1][i1]*bLen
+			else:
+				if entry2[0]=="O":
+						tot=0.0
+						for j in range4:
+							if i1==j:
+								tot+=(1.0+mutMatrix[i1][i1]*bLen)*entry2[4][j]
+							else:
+								tot+=mutMatrix[i1][j]*bLen*entry2[4][j]
+						if tot>sys.float_info.min:
+							Lkcost+=log(tot)
+						else:
+							return float("-inf")
+
+				else:
+					if bLen<thresholdProb2:
+						return float("-inf")
+					if entry2[0]=="R":
+						i2=allelesLow[ref[pos-1]]
+					else:
+						i2=alleles[entry2[0]]
+					Lkcost+=log(mutMatrix[i1][i2]*bLen)
+
+		pos+=length
+		if pos>lRef:
+			break
+		if pos>end1:
+			indexEntry1+=1
+			entry1=probVectP[indexEntry1]
+			pos1=entry1[1]
+			if entry1[0]!="N" and entry1[0]!="R":
+				end1=pos1
+			else:
+				end1=pos1+entry1[2]-1
+		if pos>end2:
+			indexEntry2+=1
+			entry2=probVectC[indexEntry2]
+			pos2=entry2[1]
+			if entry2[0]!="N" and entry2[0]!="R":
+				end2=pos2
+			else:
+				end2=pos2+entry2[2]-1
+		end=end1
+		if end2<end:
+			end=end2
+		length=end+1-pos
+	return Lkcost-LkcostOriginal
+
+
+#function to find the best node in the tree where to append the new sample, based on the node's tot posterior state probabilities.
+def findBestParentOld(t1,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses,bestIsMidNode,bestUpLK,bestDownLK,bestDownNode,parentLK,mutMatrix,adjustBLen):
+	# print("findBestParent(), Node")
+	# print(t1)
+	# print("With probVectTot: ")
+	# print(t1.probVectTot)
+	if t1.is_leaf():
+		probVect=t1.probVect
+		comparison=isMinorSequence(probVect,diffs)
+		if comparison==1:
+			t1.minorSequences.append(sample)
+			return t1, 1.0, False, float("-inf"), float("-inf"), None, float("-inf"), None, False
+		elif comparison==2:
+			if verbose:
+				print("Second sequence is more informative than first, but for now the two sequences are not merged.")
+				print(t1.name)
+				print(sample)
+				#print(probVect)
+				#print(diffs)
+			totalMissedMinors[0]+=1
+	
+	adjusted=False
+	if t1.dist>thresholdProb2 and t1.up!=None:
+		probVect2=t1.probVectTotUp
+		LKdiff2=appendProb(probVect2,diffs,bLen,mutMatrix)
+		#if LKdiff2<(bestLKdiff-thresholdLogLK):
+		#	return None , float("-inf") , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, LKdiff2, t1, adjustBLen
+		#else:
+		if bLenAdjustment>1:
+			newLKdiff2=appendProb(probVect2,diffs,bLen*bLenAdjustment,mutMatrix)
+			if newLKdiff2>LKdiff2:
+				LKdiff2=newLKdiff2
+				adjusted=True
+			else:
+				adjusted=False
+		if LKdiff2>bestLKdiff:
+			adjustBLen=adjusted
+			bestLKdiff=LKdiff2
+			bestNodeSoFar=t1
+			failedPasses=0
+			bestIsMidNode=True
+	else:
+		LKdiff2=float("-inf")
+
+	if t1.dist>thresholdProb2:
+		probVect=t1.probVectTot
+		LKdiff=appendProb(probVect,diffs,bLen,mutMatrix)
+		#if LKdiff<(bestLKdiff-thresholdLogLK):
+		#	return None , float("-inf") , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, LKdiff2, t1, adjustBLen
+		if verbose:
+			print("Trying a new parent")
+			if t1.is_leaf():
+				print(t1.name)
+			print(probVect)
+			print("Failed passes before this step: "+str(failedPasses)+" logLK score: "+str(LKdiff))
+		if bLenAdjustment>1:
+			newLKdiff=appendProb(probVect,diffs,bLen*bLenAdjustment,mutMatrix)
+			if newLKdiff>LKdiff:
+				LKdiff=newLKdiff
+				adjusted=True
+			else:
+				adjusted=False
+		if LKdiff>bestLKdiff:
+			adjustBLen=adjusted
+			bestLKdiff=LKdiff
+			bestNodeSoFar=t1
+			failedPasses=0
+			bestIsMidNode=False
+			bestUpLK=LKdiff2
+		elif LKdiff2>=(bestLKdiff-thresholdProb):
+			bestUpLK=parentLK
+			bestDownLK=LKdiff
+			bestDownNode=t1
+		elif LKdiff<(parentLK-1.0):
+			failedPasses+=1
+			if failedPasses>allowedFails and LKdiff<(bestLKdiff-thresholdLogLK):
+				#return bestNodeSoFar , bestLKdiff , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, LKdiff2, t1, adjustBLen
+				return None , float("-inf") , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, LKdiff2, t1, adjustBLen
+	else:
+		#LKdiff=float("-inf")
+		LKdiff=parentLK
+	# print("t1.dist "+str(t1.dist))
+	# print("LKdiff "+str(LKdiff))
+	# print("LKdiff2 "+str(LKdiff2))
+	
+
+	bestOfChildLK=float("-inf")
+	bestChild=None
+	# print("Before child loop, best child")
+	# print(bestChild)
+	# print(bestOfChildLK)
+	for c in t1.children:
+		node, score , childIsMidNode, childUpLK, childDownLK, childBestDownNode, currentBestChildLK, currentBestChild , adjustBLenChild = findBestParent(c,diffs,sample,bLen,bestLKdiff,bestNodeSoFar,failedPasses,bestIsMidNode,bestUpLK,bestDownLK,bestDownNode,LKdiff,mutMatrix,adjustBLen)
+		if score>0.5:
+			return node, score , False, float("-inf"), float("-inf"), None, float("-inf"), None, False
+		if score>bestLKdiff+0.0001:
+			bestLKdiff=score
+			bestNodeSoFar=node
+			bestIsMidNode=childIsMidNode
+			bestUpLK=childUpLK
+			bestDownLK=childDownLK
+			bestDownNode=childBestDownNode
+			adjustBLen=adjustBLenChild
+		if currentBestChildLK>bestOfChildLK:
+			bestOfChildLK=currentBestChildLK
+			bestChild=currentBestChild
+		# print("Inside child loop, best child")
+		# print(bestChild)
+		# print(bestOfChildLK)
+	# print("End of child loop for node")
+	# print(t1)
+	# print(t1.dist)
+	# print("best child")
+	# print(bestChild)
+	# if bestChild!=None:
+	# 	print(bestChild.dist)
+	# print(bestOfChildLK)
+	if LKdiff>=(bestLKdiff-thresholdProb) and bestOfChildLK>bestDownLK:
+		bestDownLK=bestOfChildLK
+		bestDownNode=bestChild
+	# print("best node in absolute")
+	# print(bestNodeSoFar)
+	# print(bestIsMidNode)
+	# print("with lk "+str(bestLKdiff))
+	# print("LKdiff: "+str(LKdiff))
+	# print("with best child ")
+	# print(bestDownNode)
+	# print("with lk "+str(bestDownLK))
+	# print("while current best child")
+	# print(bestChild)
+	# print("with lk "+str(bestOfChildLK))
+	# print("\n\n")
+	if (t1.dist>thresholdProb2) and (t1.up!=None):
+		if t1.dist>bLen/(bLenFactor+thresholdProb) and parentLK>=(bestLKdiff-thresholdProb):
+			#if t1.up.children[0]==t1:
+			#	vectUp=t1.up.probVectUpRight
+			#else:
+			#	vectUp=t1.up.probVectUpLeft
+			newBLen2=t1.dist/4
+			bestLKdiff2=LKdiff2
+			furtherNode=0
+			while newBLen2>bLen/(bLenFactor+thresholdProb):
+				#newProbVect2=mergeVectorsUpDown(vectUp,newBLen2,t1.probVect,t1.dist-newBLen2,mutMatrix)
+				newProbVect2=t1.furtherMidNodes[furtherNode]
+				furtherNode+=1
+				newLKdiff2=appendProb(newProbVect2,diffs,bLen,mutMatrix)
+				if bLenAdjustment>1:
+					newLKdiff3=appendProb(newProbVect2,diffs,bLen*bLenAdjustment,mutMatrix)
+					if newLKdiff3>newLKdiff2:
+						newLKdiff2=newLKdiff3
+						adjusted=True
+					else:
+						adjusted=False
+				if newLKdiff2>bestLKdiff2:
+					bestLKdiff2=newLKdiff2
+					adjustBLen=adjusted
+				else:
+					break
+				newBLen2=newBLen2/2
+			return bestNodeSoFar , bestLKdiff , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, bestLKdiff2, t1, adjustBLen
+		else:	
+			return bestNodeSoFar , bestLKdiff , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, LKdiff2, t1, adjustBLen
+	else:
+		return bestNodeSoFar , bestLKdiff , bestIsMidNode, bestUpLK, bestDownLK, bestDownNode, bestOfChildLK, bestChild, adjustBLen
 
 
 
