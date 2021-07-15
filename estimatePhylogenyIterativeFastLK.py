@@ -5,18 +5,17 @@ from math import log
 import argparse
 from time import time
 #from ete3 import Tree
+import os.path
 
-#©EMBL-European Bioinformatics Institues, 2021
+#©EMBL-European Bioinformatics Institute, 2021
 
 #Estimate a tree using fastLK from a diff format and using iterative sample placement.
 
-#TODO: try removing dependency from ete3 to use pypy
-
 parser = argparse.ArgumentParser(description='Run estimation of mutation rates and synonymous site selection from SARS-CoV-2 data, and generate plots.')
-parser.add_argument('--path',default="", help='path where to find files and plot results.')
-parser.add_argument('--input',default="", help='input diff file name found in folder specified by --path.')
-parser.add_argument('--reference',default="EPI_ISL_402124_lowercase.fasta", help='input reference file name found in folder specified by --path.')
-parser.add_argument('--output',default="iterativeFastLK.tree", help='output newick file name to be written in the folder --path.')
+#parser.add_argument('--path',default="", help='path where to find files and plot results.')
+parser.add_argument('--input',default="/Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/phylogenetic_inference/2021-03-31_unmasked_differences_reduced.txt_consensus-based.txt", help='input diff file name.')
+parser.add_argument('--reference',default="/Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/phylogenetic_inference/2021-03-31_unmasked_differences_reduced.txt_consensus.fa", help='input reference file name found in folder specified by --path.')
+parser.add_argument('--output',default="/Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/phylogenetic_inference/iterativeFastLK", help='output newick file name to be written in the folder --path.')
 parser.add_argument("--onlyNambiguities", help="Treat all ambiguities as N (total missing information).", action="store_true")
 parser.add_argument("--useLogs", help="Calculate logarithms of non-mutation probabilities, otherwise approximate them.", action="store_true")
 parser.add_argument("--thresholdProb",help="relative probability threshold used to ignore possible states with very low probabilities.",  type=float, default=0.0000001)
@@ -26,22 +25,33 @@ parser.add_argument("--bLenAdjustment",help="If >1, try placing also with a long
 parser.add_argument("--verbose", help="Print to screen a lot of stuff.", action="store_true")
 parser.add_argument("--model", help="Which substitution model should be used. Allowed models so far are JC, GTR (default) or UNREST.", default="GTR")
 parser.add_argument("--bLenFactor",help="split branch length by this factor when looking for best child of best node.",  type=float, default=2.0)
+parser.add_argument("--overwrite", help="Overwrite previous results if already present.", action="store_true")
 args = parser.parse_args()
 
 onlyNambiguities=args.onlyNambiguities
 useLogs=args.useLogs
 thresholdProb=args.thresholdProb
 verbose=args.verbose
-pathSimu=args.path
-inputFile=pathSimu+args.input
-outputFile=pathSimu+args.output
-refFile=pathSimu+args.reference
+#pathSimu=args.path
+#inputFile=pathSimu+args.input
+#outputFile=pathSimu+args.output
+#refFile=pathSimu+args.reference
+inputFile=args.input
+outputFile=args.output
+refFile=args.reference
 allowedFails=args.allowedFails
 model=args.model
 bLenAdjustment=args.bLenAdjustment
 thresholdLogLK=args.thresholdLogLK
 bLenFactor=args.bLenFactor
+overwrite=args.overwrite
 example=False
+
+if os.path.isfile(outputFile+"_tree.tree")  and (not overwrite):
+	print("File "+outputFile+"_tree.tree already exists, quitting fastLK tree inference. Use option --overwrite if you want to overwirte previous inference.")
+	exit()
+
+
 
 class Tree(object):
 	def __init__(self, name='', children=None, dist=1.0):
@@ -324,6 +334,11 @@ else:
 	pseudoMutCounts=[[0.0,1.0,5.0,2.0],[2.0,0.0,1.0,40.0],[5.0,2.0,0.0,20.0],[2.0,3.0,1.0,0.0]]
 	mutMatrix=updateSubMatrix(pseudoMutCounts,model)
 
+cumulativeRate=[0.0]
+for i in range(lRef):
+	ind=allelesLow[ref[i]]
+	cumulativeRate.append(cumulativeRate[-1]+mutMatrix[ind][ind])
+
 
 
 #Sort samples based on distance from reference, but punishing more isolated N's and ambiguity codes.
@@ -487,11 +502,12 @@ def appendProb(probVectP,probVectC,bLen,mutMatrix):
 			pass
 		elif entry1[0]=="R":
 			if entry2[0]=="R":
-				cB1=cumulativeBases[end]
-				cB2=cumulativeBases[pos-1]
+				#cB1=cumulativeBases[end]
+				#cB2=cumulativeBases[pos-1]
 				if entry1[4]:
 					#Lkcost+=(bLen+entry1[3]+entry1[5])*(mutMatrix[0][0]*(cumulativeBases[end][0]-cumulativeBases[posm1][0])+mutMatrix[1][1]*(cumulativeBases[end][1]-cumulativeBases[posm1][1])+mutMatrix[2][2]*(cumulativeBases[end][2]-cumulativeBases[posm1][2])+mutMatrix[3][3]*(cumulativeBases[end][3]-cumulativeBases[posm1][3]))
-					Lkcost+=(bLen+entry1[3]+entry1[5])*(mutMatrix[0][0]*(cB1[0]-cB2[0])+mutMatrix[1][1]*(cB1[1]-cB2[1])+mutMatrix[2][2]*(cB1[2]-cB2[2])+mutMatrix[3][3]*(cB1[3]-cB2[3]))
+					#Lkcost+=(bLen+entry1[3]+entry1[5])*(mutMatrix[0][0]*(cB1[0]-cB2[0])+mutMatrix[1][1]*(cB1[1]-cB2[1])+mutMatrix[2][2]*(cB1[2]-cB2[2])+mutMatrix[3][3]*(cB1[3]-cB2[3]))
+					Lkcost+=(bLen+entry1[3]+entry1[5])*(cumulativeRate[end]-cumulativeRate[pos-1])
 					#tot=0.0
 					#for i in range4:
 					#	tot+=mutMatrix[i][i]*(cumulativeBases[end][i]-cumulativeBases[posm1][i])
@@ -499,7 +515,8 @@ def appendProb(probVectP,probVectC,bLen,mutMatrix):
 					#Lkcost+=tot
 				else:
 					#Lkcost+=(bLen+entry1[3])*(mutMatrix[0][0]*(cumulativeBases[end][0]-cumulativeBases[posm1][0])+mutMatrix[1][1]*(cumulativeBases[end][1]-cumulativeBases[posm1][1])+mutMatrix[2][2]*(cumulativeBases[end][2]-cumulativeBases[posm1][2])+mutMatrix[3][3]*(cumulativeBases[end][3]-cumulativeBases[posm1][3]))
-					Lkcost+=(bLen+entry1[3])*(mutMatrix[0][0]*(cB1[0]-cB2[0])+mutMatrix[1][1]*(cB1[1]-cB2[1])+mutMatrix[2][2]*(cB1[2]-cB2[2])+mutMatrix[3][3]*(cB1[3]-cB2[3]))
+					#Lkcost+=(bLen+entry1[3])*(mutMatrix[0][0]*(cB1[0]-cB2[0])+mutMatrix[1][1]*(cB1[1]-cB2[1])+mutMatrix[2][2]*(cB1[2]-cB2[2])+mutMatrix[3][3]*(cB1[3]-cB2[3]))
+					Lkcost+=(bLen+entry1[3])*(cumulativeRate[end]-cumulativeRate[pos-1])
 					#tot=0.0
 					#for i in range4:
 					#	tot+=mutMatrix[i][i]*(cumulativeBases[end][i]-cumulativeBases[posm1][i])
@@ -1856,7 +1873,7 @@ def updatePartialsFromTop(node,probVectUp,mutMatrix):
 		#if node.dist>bLen/2:
 		if node.dist>4*bLen/(bLenFactor+thresholdProb):
 			createFurtherMidNodes(node,probVectUp,bLen)
-	if len(node.children)==0:
+	if len(node.children)==0 and node.dist>thresholdProb2:
 		newTot=mergeVectorsUpDown(probVectUp,node.dist,node.probVect,0.0,mutMatrix)
 		if newTot==None:
 			if node.up.children[0]==node:
@@ -1866,13 +1883,19 @@ def updatePartialsFromTop(node,probVectUp,mutMatrix):
 			return
 		newTot=shorten(newTot)
 		node.probVectTot=newTot
-	else:
+	elif len(node.children)>0:
 		child0Vect=node.children[0].probVect
 		child1Vect=node.children[1].probVect
 		dist0=node.children[0].dist
 		dist1=node.children[1].dist
 		newUpRight=mergeVectorsUpDown(probVectUp,node.dist,child1Vect,dist1,mutMatrix)
 		newUpLeft=mergeVectorsUpDown(probVectUp,node.dist,child0Vect,dist0,mutMatrix)
+		if newUpRight==None or newUpLeft==None:
+			if node.up.children[0]==node:
+				updateBLen(node.up,0,bLen,mutMatrix)
+			else:
+				updateBLen(node.up,1,bLen,mutMatrix)
+			return
 		# print("Updating from top")
 		# print(node.probVectUpRight)
 		# print(newUpRight)
@@ -1887,13 +1910,14 @@ def updatePartialsFromTop(node,probVectUp,mutMatrix):
 			# exit()
 			newUpRight =shorten(newUpRight)
 			node.probVectUpRight=newUpRight
-			newTot=mergeVectorsUpDown(newUpRight,0.0,child0Vect,dist0,mutMatrix)
-			if newTot==None:
-				updateBLen(node,0,bLen,mutMatrix)
-				return
-			newTot =shorten(newTot)
-			node.probVectTot=newTot
-			updatedTot=True
+			if node.dist>thresholdProb2:
+				newTot=mergeVectorsUpDown(newUpRight,0.0,child0Vect,dist0,mutMatrix)
+				if newTot==None:
+					updateBLen(node,0,bLen,mutMatrix)
+					return
+				newTot =shorten(newTot)
+				node.probVectTot=newTot
+				updatedTot=True
 			updatePartialsFromTop(node.children[0],newUpRight,mutMatrix)
 		if areVectorsDifferent(node.probVectUpLeft,newUpLeft):
 			# print("Vectors up left are different")
@@ -1902,7 +1926,7 @@ def updatePartialsFromTop(node,probVectUp,mutMatrix):
 			# exit()
 			newUpLeft =shorten(newUpLeft)
 			node.probVectUpLeft=newUpLeft
-			if not updatedTot:
+			if (not updatedTot) and node.dist>thresholdProb2:
 				newTot=mergeVectorsUpDown(newUpLeft,0.0,child1Vect,dist1,mutMatrix)
 				if newTot==None:
 					updateBLen(node,1,bLen,mutMatrix)
@@ -1935,26 +1959,25 @@ def updatePartialsFromBottom(node,probVectDown,childNum,childNode,mutMatrix):
 		print(node.probVect)
 	updatedTot=False
 	if areVectorsDifferent(node.probVect,newVect):
-		if verbose:
-			print("Vectors are different")
 		newVect =shorten(newVect)
 		node.probVect=newVect
-		if childNum==0:
-			newTot=mergeVectorsUpDown(node.probVectUpRight,0.0,probVectDown,childDist,mutMatrix)
-			if newTot==None:
-				updateBLen(node,0,bLen,mutMatrix)
-				return
-		else:
-			newTot=mergeVectorsUpDown(node.probVectUpLeft,0.0,probVectDown,childDist,mutMatrix)
-			if newTot==None:
-				updateBLen(node,1,bLen,mutMatrix)
-				return
-		newTot=shorten(newTot)
-		node.probVectTot=newTot
-		if verbose:
-			print("new tot vect")
-			print(node.probVectTot)
-		updatedTot=True
+		if node.dist>thresholdProb2:
+			if childNum==0:
+				newTot=mergeVectorsUpDown(node.probVectUpRight,0.0,probVectDown,childDist,mutMatrix)
+				if newTot==None:
+					updateBLen(node,0,bLen,mutMatrix)
+					return
+			else:
+				newTot=mergeVectorsUpDown(node.probVectUpLeft,0.0,probVectDown,childDist,mutMatrix)
+				if newTot==None:
+					updateBLen(node,1,bLen,mutMatrix)
+					return
+			newTot=shorten(newTot)
+			node.probVectTot=newTot
+			if verbose:
+				print("new tot vect")
+				print(node.probVectTot)
+			updatedTot=True
 		if node.up != None:
 			updatePartialsFromBottom(node.up,newVect,-1,node,mutMatrix)
 		if verbose:
@@ -1970,6 +1993,9 @@ def updatePartialsFromBottom(node,probVectDown,childNum,childNode,mutMatrix):
 			vectUp=node.up.probVectUpLeft
 		if childNum==0:
 			newUpLeftVect=mergeVectorsUpDown(vectUp,node.dist,probVectDown,childDist,mutMatrix)
+			if newUpLeftVect==None:
+				updateBLen(node,1,bLen,mutMatrix)
+				return
 			if areVectorsDifferent(node.probVectUpLeft,newUpLeftVect):
 				if verbose:
 					print("Moving up the update from left; new UpLeft and old UpLeft")
@@ -1977,7 +2003,7 @@ def updatePartialsFromBottom(node,probVectDown,childNum,childNode,mutMatrix):
 					print(node.probVectUpLeft)
 				newUpLeftVect =shorten(newUpLeftVect)
 				node.probVectUpLeft=newUpLeftVect
-				if not updatedTot:
+				if (not updatedTot) and node.dist>thresholdProb2:
 					if verbose:
 						print("Updating tot: old tot and new tot")
 						print(node.probVectTot)
@@ -1989,22 +2015,26 @@ def updatePartialsFromBottom(node,probVectDown,childNum,childNode,mutMatrix):
 					node.probVectTot=newTot
 					if verbose:
 						print(newTot)
-				
+					updatedTot=True
 				updatePartialsFromTop(node.children[1],newUpLeftVect,mutMatrix)
 		else:
 			newUpRightVect=mergeVectorsUpDown(vectUp,node.dist,probVectDown,childDist,mutMatrix)
+			if newUpRightVect==None:
+				updateBLen(node,1,bLen,mutMatrix)
+				return
 			if areVectorsDifferent(node.probVectUpRight,newUpRightVect):
 				if verbose:
 					print("Moving up the update from right")
 				newUpRightVect =shorten(newUpRightVect)
 				node.probVectUpRight=newUpRightVect
-				if not updatedTot:
+				if (not updatedTot) and node.dist>thresholdProb2:
 					newTot=mergeVectorsUpDown(newUpRightVect,0.0,otherChildVect,otherChildDist,mutMatrix)
 					if newTot==None:
 						updateBLen(node,0,bLen,mutMatrix)
 						return
 					newTot=shorten(newTot)
 					node.probVectTot=newTot
+					updatedTot=True
 				updatePartialsFromTop(node.children[0],newUpRightVect,mutMatrix)
 		if updatedTot:
 			newTot=mergeVectorsUpDown(vectUp,node.dist/2,node.probVect,node.dist/2,mutMatrix)
@@ -2700,6 +2730,15 @@ def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode, best
 
 
 
+def updateCumulativeNonMutationProb(cumulativeRate):
+	#cumulativeRate=[0.0]
+	for i in range(lRef):
+		ind=allelesLow[ref[i]]
+		cumulativeRate[i+1]=cumulativeRate[i]+mutMatrix[ind][ind]
+		#cumulativeRate.append(mutMatrix[ind][ind])
+
+
+
 
 
 distances=distancesFromRefPunishNs(data)
@@ -2730,8 +2769,12 @@ for d in distances:
 	newPartials=probVectTerminalNode(data[sample],0.0)
 	#print("\n\n\n\n\n")
 	#print(sample)
-	if (numSamples%5)==0:
+	if (numSamples%40)==0:
+		oldMatrix=mutMatrix
 		mutMatrix=updateSubMatrix(pseudoMutCounts,model)
+		if abs(oldMatrix[0][0]-mutMatrix[0][0])>0.001 or abs(oldMatrix[1][1]-mutMatrix[1][1])>0.001 or abs(oldMatrix[2][2]-mutMatrix[2][2])>0.001 or abs(oldMatrix[3][3]-mutMatrix[3][3])>0.001:
+			updateCumulativeNonMutationProb(cumulativeRate)
+
 		#print(mutMatrix)
 	if (numSamples%500)==0:
 		print("Sample num "+str(numSamples))
@@ -2788,8 +2831,14 @@ def createNewick(node):
 newickString=createNewick(t1)
 
 #print(treeString)
-file=open(outputFile,"w")
+file=open(outputFile+"_tree.tree","w")
 file.write(newickString+";")
+file.close()
+file=open(outputFile+"_subs.txt","w")
+for i in range4:
+	for j in range4:
+		file.write(str(mutMatrix[i][j])+"\t")
+	file.write("\n")
 file.close()
 print("Missed minor samples: "+str(totalMissedMinors[0]))
 print("Final Substitution matrix:")
@@ -2799,7 +2848,7 @@ print("Time spent updating the tree: "+str(timePlacing))
 exit()
 
 
-#estimate susbstitution rates?
+
 #optimize branch lengths?
 #Optimize root position?
 #Calculate pairwise distances?

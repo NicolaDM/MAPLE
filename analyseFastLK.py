@@ -18,7 +18,7 @@ import time
 
 from ete3 import Tree
 
-#©EMBL-European Bioinformatics Institues, 2021
+#©EMBL-European Bioinformatics Institute, 2021
 
 #Run a bunch of analyses regarding efficiently calculating phylogenetic likelihoods.
 #Also includes experimental code for estimating an initial tree (not finished yet).
@@ -3666,7 +3666,7 @@ if subsampleTreeInference>0:
 			else:
 				fastLKtreeName="fastLKtree_repeat"+str(repeat+1)+"_"+str(subsampleTreeInference)+"samples.tree"
 			start = time.time()
-			os.system("pypy3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/estimatePhylogenyIterativeFastLK.py --path "+pathSimu+" --reference "+refInputName+" --input "+diffFile+" --allowedFails "+str(allowedFails)+" --thresholdLogLK "+str(thresholdLogLK)+" --bLenAdjustment "+str(bLenAdjustment)+" --bLenFactor "+str(bLenFactor)+" --output "+fastLKtreeName)
+			os.system("pypy3 /Users/demaio/Desktop/GISAID-hCoV-19-phylogeny-2021-03-12/estimatePhylogenyIterativeFastLK.py --reference "+pathSimu+refInputName+" --input "+pathSimu+diffFile+" --allowedFails "+str(allowedFails)+" --thresholdLogLK "+str(thresholdLogLK)+" --bLenAdjustment "+str(bLenAdjustment)+" --bLenFactor "+str(bLenFactor)+" --overwrite --output "+pathSimu+fastLKtreeName)
 			runTime=time.time() - start
 			timesFastLK.append(runTime)
 			totalFastTime+=runTime
