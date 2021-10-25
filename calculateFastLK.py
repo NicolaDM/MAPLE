@@ -198,8 +198,12 @@ def probVectTerminalNode(diffs,bLen):
 		probVect.append(["R",pos,lRef+1-pos,bLen])
 	return probVect
 
+mutMatrix=[[0.0,0.04,0.3,0.1],[0.04,0.0,0.02,1.0],[0.3,0.02,0.0,1.0],[0.1,1.0,1.0,0.0]]
+rootFreqs=[0.25,0.25,0.25,0.25]
+rootFreqsLog=[math.log(0.25),math.log(0.25),math.log(0.25),math.log(0.25)]
+#0.04,0.3,0.1,0.02,1.0,1.0
 #preliminary nuc mutation rate matrix, taken from De Maio et al 2021 GBE
-mutMatrix=[[0.0,0.039,0.310,0.123],[0.140,0.0,0.022,3.028],[0.747,0.113,0.0,2.953],[0.056,0.261,0.036,0.0]]
+#mutMatrix=[[0.0,0.039,0.310,0.123],[0.140,0.0,0.022,3.028],[0.747,0.113,0.0,2.953],[0.056,0.261,0.036,0.0]]
 mutMatrix[0][0]=-(mutMatrix[0][1]+mutMatrix[0][2]+mutMatrix[0][3])
 mutMatrix[1][1]=-(mutMatrix[1][0]+mutMatrix[1][2]+mutMatrix[1][3])
 mutMatrix[2][2]=-(mutMatrix[2][0]+mutMatrix[2][1]+mutMatrix[2][3])
