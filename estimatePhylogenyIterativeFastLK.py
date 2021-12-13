@@ -20,9 +20,9 @@ parser.add_argument("--onlyNambiguities", help="Treat all ambiguities as N (tota
 parser.add_argument("--useLogs", help="Calculate logarithms of non-mutation probabilities, otherwise approximate them.", action="store_true")
 parser.add_argument("--thresholdProb",help="relative probability threshold used to ignore possible states with very low probabilities.",  type=float, default=0.0000001)
 parser.add_argument("--thresholdLogLK",help="logLK difference threshold to consider a logLk close to optimal.",  type=float, default=25.0)
-parser.add_argument("--thresholdLogLKtopology",help="logLK difference threshold to consider a logLk close to optimal when looking for topology improvements.",  type=float, default=25.0)
+parser.add_argument("--thresholdLogLKtopology",help="logLK difference threshold to consider a logLk close to optimal when looking for topology improvements.",  type=float, default=60.0)
 parser.add_argument("--allowedFails",help="Number of times one can go down the tree without inclreasing placement likelihood before the tree traversal is stopped (only applies to non-0 branch lengths).",  type=int, default=2)
-parser.add_argument("--allowedFailsTopology",help="Number of times one can crawl along the tree decreasing placement likelihood before the tree traversal is stopped during topology search (only applies to non-0 branch lengths).",  type=int, default=-1)
+parser.add_argument("--allowedFailsTopology",help="Number of times one can crawl along the tree decreasing placement likelihood before the tree traversal is stopped during topology search (only applies to non-0 branch lengths).",  type=int, default=3)
 parser.add_argument("--bLenAdjustment",help="If >1, try placing also with a longer bLen than the standard bLen.",  type=int, default=1)
 parser.add_argument("--verbose", help="Print to screen a lot of stuff.", action="store_true")
 parser.add_argument("--model", help="Which substitution model should be used. Allowed models so far are JC, GTR (default) or UNREST.", default="GTR")
@@ -58,6 +58,8 @@ numTopologyImprovements=args.numTopologyImprovements
 thresholdTopologyPlacement=args.thresholdTopologyPlacement
 example=False
 
+minimumCarryOver=sys.float_info.min*(1e50)
+
 if os.path.isfile(outputFile+"_tree.tree")  and (not overwrite):
 	print("File "+outputFile+"_tree.tree already exists, quitting fastLK tree inference. Use option --overwrite if you want to overwirte previous inference.")
 	exit()
@@ -86,6 +88,7 @@ class Tree(object):
 alleles={"A":0,"C":1,"G":2,"T":3}
 allelesList=["A","C","G","T"]
 allelesLow={"a":0,"c":1,"g":2,"t":3}
+allelesUpOrLow={"a":0,"c":1,"g":2,"t":3,"A":0,"C":1,"G":2,"T":3}
 allelesListLow=["a","c","g","t"]
 ambiguities={"y":[0.0,1.0,0.0,1.0],"r":[1.0,0.0,1.0,0.0],"w":[1.0,0.0,0.0,1.0],"s":[0.0,1.0,1.0,0.0],"k":[0.0,0.0,1.0,1.0],"m":[1.0,1.0,0.0,0.0],"d":[1.0,0.0,1.0,1.0],"v":[1.0,1.0,1.0,0.0],"h":[1.0,1.0,0.0,1.0],"b":[0.0,1.0,1.0,1.0]}
 
@@ -97,6 +100,7 @@ def collectReference(fileName):
 	while line!="":
 		line=file.readline()
 		ref+=line.replace("\n","")
+	ref=ref.lower()
 	lRef=len(ref)
 	#print("Ref genome length: "+str(lRef))
 	file.close()
@@ -107,7 +111,7 @@ def collectReference(fileName):
 		cumulativeBases.append(list(cumulativeBases[i]))
 		#for k in range(4):
 		#	cumulativeBases[i+1][k]=cumulativeBases[i][k]
-		cumulativeBases[i+1][allelesLow[ref[i]]]+=1
+		cumulativeBases[i+1][allelesUpOrLow[ref[i]]]+=1
 	#print("cumulativeBases")
 	#print(cumulativeBases[-1])
 	rootFreqs=[0.0,0.0,0.0,0.0]
@@ -144,9 +148,12 @@ def readConciseAlignment(fileName):
 		while line!="" and line!="\n" and line[0]!=">":
 			linelist=line.split()
 			if len(linelist)>2:
-				entry=(linelist[0],int(linelist[1]),int(linelist[2]))
+				entry=(linelist[0].lower(),int(linelist[1]),int(linelist[2]))
 			else:
-				entry=(linelist[0],int(linelist[1]))
+				entry=(linelist[0].lower(),int(linelist[1]))
+			if ref[entry[1]-1]==entry[0]:
+				print("Wrong reference or diff file?")
+				exit()
 			seqList.append(entry)
 			line=fileI.readline()
 		data[name]=seqList
@@ -159,7 +166,7 @@ if not runOnlyExample:
 #read sequence data from file
 	data=readConciseAlignment(inputFile)
 	samples=data.keys()
-	print(str(len(samples))+" sequences in the concise DNA data file")
+	#print(str(len(samples))+" sequences in the concise DNA data file")
 
 range4=range(4)
 thresholdProb2=thresholdProb*thresholdProb
@@ -230,7 +237,10 @@ def probVectTerminalNode(diffs,bLen):
 				probVect.append(["R",pos,currPos-pos,bLen,False])
 				pos=currPos
 			if m[0]=="n" or m[0]=="-":
-				length=m[2]
+				if len(m)>2:
+					length=m[2]
+				else:
+					length=1
 				#region with no info, store first position and length.
 				probVect.append(["N",currPos,length,bLen,False])
 				pos=currPos+length
@@ -307,7 +317,10 @@ def distancesFromRefPunishNs(data,samples):
 				comparisons+=currPos-pos
 				pos=currPos
 			if m[0]=="n" or m[0]=="-":
-				pos=currPos+m[2]
+				if len(m)>2:
+					pos=currPos+m[2]
+				else:
+					pos=currPos+1
 				#if m[2]==1:
 				diffNum+=1
 			elif m[0] in allelesLow:
@@ -623,6 +636,12 @@ def appendProb(probVectP,probVectC,bLen,mutMatrix):
 						totalFactor*=(mutMatrix[i1][i2]*(bLen+entry1[3]))
 						#Lkcost+=log(mutMatrix[i1][i2]*bLen13)
 
+		if totalFactor<=minimumCarryOver:
+			if totalFactor<sys.float_info.min:
+				return float("-inf")
+			Lkcost+=log(totalFactor)
+			totalFactor=1.0
+
 		pos+=length
 		if pos>lRef:
 			break
@@ -937,12 +956,12 @@ def mergeVectorsUpDown(probVectUp,bLenUp,probVectDown,bLenDown,mutMatrix):
 						#print(entry1)
 						#print(entry2)
 						return None
-					elif entry2[0]=="R" and (totLen2<thresholdProb2):
+					elif entry2[0]=="R" and (totLen2<thresholdProb2) and (totLen1>thresholdProb2*10000):
 						probVect.append(["R",pos,length,0.0,False])
-					elif (totLen2<thresholdProb2) and entry2[0]!="O":
+					elif (totLen2<thresholdProb2) and entry2[0]!="O" and (totLen1>thresholdProb2*10000):
 						probVect.append([entry2[0],pos,1,0.0,False])
 					elif entry1[0]=="R":
-						if entry2[0]=="R" or (totLen1<thresholdProb2):
+						if entry2[0]=="R" or ((totLen1<thresholdProb2) and (totLen2>thresholdProb2*10000)):
 							probVect.append(["R",pos,length,0.0,False])
 						else:
 							#print("Inside big loop")
@@ -1039,7 +1058,7 @@ def mergeVectorsUpDown(probVectUp,bLenUp,probVectDown,bLenDown,mutMatrix):
 							probVect.append([state,pos,1,0.0,False])
 					#entry1 is a non-ref nuc
 					else:
-						if entry2[0]==entry1[0] or (totLen1<thresholdProb2):
+						if entry2[0]==entry1[0] or ((totLen1<thresholdProb2) and (totLen2>thresholdProb2*10000)):
 							probVect.append([entry1[0],pos,1,0.0,False])
 						else:
 							i1=alleles[entry1[0]]
@@ -1409,12 +1428,12 @@ def mergeVectors(probVect1,bLen1,probVect2,bLen2,mutMatrix):
 					print(entry2)
 					#exit()
 					return None
-				elif entry2[0]=="R" and (entry2[3]+bLen2<thresholdProb2):
+				elif entry2[0]=="R" and (entry2[3]+bLen2<thresholdProb2) and (entry1[3]+bLen1>thresholdProb2*10000):
 					probVect.append(["R",pos,length,0.0,False])
-				elif (entry2[3]+bLen2<thresholdProb2) and entry2[0]!="O":
+				elif (entry2[3]+bLen2<thresholdProb2) and entry2[0]!="O" and (entry1[3]+bLen1>thresholdProb2*10000):
 					probVect.append([entry2[0],pos,1,0.0,False])
 				elif entry1[0]=="R":
-					if entry2[0]=="R" or (entry1[3]+bLen1<thresholdProb2):
+					if entry2[0]=="R" or ((entry1[3]+bLen1<thresholdProb2) and (entry2[3]+bLen2>thresholdProb2*10000)):
 						probVect.append(["R",pos,length,0.0,False])
 					elif entry2[0]=="O":
 						i1=allelesLow[ref[pos-1]]
@@ -1498,7 +1517,7 @@ def mergeVectors(probVect1,bLen1,probVect2,bLen2,mutMatrix):
 						probVect.append([state,pos,1,0.0,False])
 				#entry1 is a non-ref nuc
 				else:
-					if entry2[0]==entry1[0] or (entry1[3]+bLen1<thresholdProb2):
+					if entry2[0]==entry1[0] or ((entry1[3]+bLen1<thresholdProb2) and (entry2[3]+bLen2>thresholdProb2*10000)):
 						probVect.append([entry1[0],pos,1,0.0,False])
 					else:
 						i1=alleles[entry1[0]]
@@ -2170,7 +2189,7 @@ def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode, best
 		#newInternalNode.children[1].up=newInternalNode
 		newInternalNode.dist=distTop
 		newInternalNode.children[1].probVect=newPartials
-		newVect=mergeVectorsUpDown(vectUp,newInternalNode.dist,newPartials,bestLen,mutMatrix)
+		newVect=mergeVectorsUpDown(vectUp,distTop,newPartials,bestLen,mutMatrix)
 		#newVect=shorten(newVect)
 		newInternalNode.probVectUpRight=newVect
 		newInternalNode.probVectUpLeft=childBestVect
@@ -2178,20 +2197,45 @@ def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode, best
 		#newVect=shorten(newVect)
 		newInternalNode.probVect=newVect
 		newVect=mergeVectorsUpDown(vectUp,distTop/2,newInternalNode.probVect,distTop/2,mutMatrix)
+		if newVect==None:
+			print("newInternalNode.up.probVectTot")
+			print(newInternalNode.up.probVectTot)
+			print("node.probVectTotUp")
+			print(node.probVectTotUp)
+			print("node.probVectTot")
+			print(node.probVectTot)
+			print("childBestVect")
+			print(childBestVect)
+			print("LK1")
+			print(LK1)
+			print("newPartials")
+			print(newPartials)
+			print("bestLen")
+			print(bestLen)
+			print("vectUp")
+			print(vectUp)
+			print("node.probVect")
+			print(node.probVect)
+			print("distTop")
+			print(distTop)
+			print("newInternalNode.probVect")
+			print(newInternalNode.probVect)
+			print("newVect")
+			print(newVect)
 		newVect=shorten(newVect)
 		newInternalNode.probVectTotUp=newVect
 		newVect=mergeVectorsUpDown(childBestVect,0.0,newPartials,bestLen,mutMatrix)
-		newVect=shorten(newVect)
+		#newVect=shorten(newVect)
 		newInternalNode.probVectTot=newVect
 		if distTop>4*bLen/(bLenFactor+thresholdProb):
 		#if distTop>bLen/2:
 			createFurtherMidNodes(newInternalNode,vectUp,bLen)
 		newVect=mergeVectorsUpDown(childBestVect,bestLen,newPartials,0.0,mutMatrix)
-		newVect=shorten(newVect)
+		#newVect=shorten(newVect)
 		newInternalNode.children[1].probVectTot=newVect
 		if bestLen>thresholdProb:
 			newVect=mergeVectorsUpDown(childBestVect,bestLen/2,newPartials,bestLen/2,mutMatrix)
-			newVect=shorten(newVect)
+			#newVect=shorten(newVect)
 			newInternalNode.children[1].probVectTotUp=newVect
 			if bestLen>4*bLen/(bLenFactor+thresholdProb):
 			#if bestLen>bLen/2:
@@ -2373,20 +2417,20 @@ def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode, best
 			#newVect=shorten(newVect)
 			newInternalNode.probVect=newVect
 			newVect=mergeVectorsUpDown(vectUp,distTop/2,newInternalNode.probVect,distTop/2,mutMatrix)
-			newVect=shorten(newVect)
+			#newVect=shorten(newVect)
 			newInternalNode.probVectTotUp=newVect
 			newVect=mergeVectorsUpDown(childBestVect,0.0,newPartials,bestLen,mutMatrix)
-			newVect=shorten(newVect)
+			#newVect=shorten(newVect)
 			newInternalNode.probVectTot=newVect
 			if distTop>4*bLen/(bLenFactor+thresholdProb):
 			#if distTop>bLen/2:
 				createFurtherMidNodes(newInternalNode,vectUp,bLen)
 			newVect=mergeVectorsUpDown(childBestVect,bestLen,newPartials,0.0,mutMatrix)
-			newVect=shorten(newVect)
+			#newVect=shorten(newVect)
 			newInternalNode.children[1].probVectTot=newVect
 			if bestLen>thresholdProb4:
 				newVect=mergeVectorsUpDown(childBestVect,bestLen/2,newPartials,bestLen/2,mutMatrix)
-				newVect=shorten(newVect)
+				#newVect=shorten(newVect)
 				newInternalNode.children[1].probVectTotUp=newVect
 				if bestLen>4*bLen/(bLenFactor+thresholdProb):
 				#if bestLen>bLen/2:
@@ -2491,11 +2535,11 @@ def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode, best
 				newRoot.add_child(newNode)
 				newRoot.children[1].probVect=newPartials
 				newVect=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen2,newPartials,0.0,mutMatrix)
-				newVect=shorten(newVect)
+				#newVect=shorten(newVect)
 				newRoot.children[1].probVectTot=newVect
 				if bestLen2>thresholdProb4:
 					newVect=mergeVectorsUpDown(newRoot.probVectUpLeft,bestLen2/2,newPartials,bestLen2/2,mutMatrix)
-					newVect=shorten(newVect)
+					#newVect=shorten(newVect)
 					newRoot.children[1].probVectTotUp=newVect
 					if bestLen2>4*bLen/(bLenFactor+thresholdProb):
 					#if bestLen2>bLen/2:
@@ -2636,20 +2680,20 @@ def placeSampleOnTreeNew(node,newPartials,sample,bLen,newChildLK,isMidNode, best
 				#newVect=shorten(newVect)
 				newInternalNode.probVect=newVect
 				newVect=mergeVectorsUpDown(vectUp,distTop/2,newInternalNode.probVect,distTop/2,mutMatrix)
-				newVect=shorten(newVect)
+				#newVect=shorten(newVect)
 				newInternalNode.probVectTotUp=newVect
 				newVect=mergeVectorsUpDown(parentBestVect,0.0,newPartials,bestLen,mutMatrix)
-				newVect=shorten(newVect)
+				#newVect=shorten(newVect)
 				newInternalNode.probVectTot=newVect
 				if distTop>4*bLen/(bLenFactor+thresholdProb):
 				#if distTop>bLen/2:
 					createFurtherMidNodes(newInternalNode,vectUp,bLen)
 				newVect=mergeVectorsUpDown(parentBestVect,bestLen,newPartials,0.0,mutMatrix)
-				newVect=shorten(newVect)
+				#newVect=shorten(newVect)
 				newInternalNode.children[1].probVectTot=newVect
 				if bestLen>thresholdProb4:
 					newVect=mergeVectorsUpDown(parentBestVect,bestLen/2,newPartials,bestLen/2,mutMatrix)
-					newVect=shorten(newVect)
+					#newVect=shorten(newVect)
 					newInternalNode.children[1].probVectTotUp=newVect
 					if bestLen>4*bLen/(bLenFactor+thresholdProb):
 					#if bestLen>bLen/2:
@@ -2682,9 +2726,14 @@ def updateCumulativeNonMutationProb(cumulativeRate):
 
 #set all descendant nodes to dirty
 def setAllDirty(node):
-	node.dirty=True
-	for c in node.children:
-		setAllDirty(c)
+	nextLeaves=[node]
+	#node.dirty=True
+	while len(nextLeaves)>0:
+		nextNode=nextLeaves.pop()
+		nextNode.dirty=True
+		for c in nextNode.children:
+			nextLeaves.append(c)
+			#setAllDirty(c)
 
 
 
@@ -2716,13 +2765,13 @@ def appendProbNode(probVectP,probVectC,bLen,mutMatrix):
 		elif entry1[0]=="R":
 			if entry2[0]=="R":
 				if entry1[4]:
-					Lkcost+=(bLen+entry1[3]+entry1[5])*(cumulativeRate[end]-cumulativeRate[pos-1])
+					Lkcost+=(bLen+entry1[3]+entry2[3]+entry1[5])*(cumulativeRate[end]-cumulativeRate[pos-1])
 				else:
-					Lkcost+=(bLen+entry1[3])*(cumulativeRate[end]-cumulativeRate[pos-1])
+					Lkcost+=(bLen+entry1[3]+entry2[3])*(cumulativeRate[end]-cumulativeRate[pos-1])
 			elif entry2[0]=="O":
 				i1=allelesLow[ref[pos-1]]
 				if entry1[4]:
-						bLen15=bLen+entry1[5]
+						bLen15=bLen+entry1[5]+entry2[3]
 						tot=0.0
 						for i in range4:
 							if i1==i:
@@ -2735,7 +2784,7 @@ def appendProbNode(probVectP,probVectC,bLen,mutMatrix):
 						tot=0.0
 						for j in range4:
 								tot+=mutMatrix[i1][j]*entry2[4][j]
-						tot*=(bLen+entry1[3])
+						tot*=(bLen+entry1[3]+entry2[3])
 						tot+=entry2[4][i1]
 						totalFactor*=tot
 			else: #entry1 is R and entry2 is a different but single nucleotide
@@ -2744,7 +2793,7 @@ def appendProbNode(probVectP,probVectC,bLen,mutMatrix):
 					i1=allelesLow[ref[pos-1]]
 					#tot=rootFreqs[i1]*mutMatrix[i1][i2]*(bLen+entry1[5]) + rootFreqs[i2]*mutMatrix[i2][i1]*entry1[3] + entry1[3]*(bLen+entry1[5])*(rootFreqs[0]*mutMatrix[0][i1]*mutMatrix[0][i2]+rootFreqs[1]*mutMatrix[1][i1]*mutMatrix[1][i2]+rootFreqs[2]*mutMatrix[2][i1]*mutMatrix[2][i2]+rootFreqs[3]*mutMatrix[3][i1]*mutMatrix[3][i2]) 
 					tot=0.0
-					bLen15=bLen+entry1[5]
+					bLen15=bLen+entry1[5]+entry2[3]
 					for i in range4:
 						if i1==i:
 							tot+=rootFreqs[i]*(1.0+mutMatrix[i][i1]*entry1[3])*mutMatrix[i][i2]*bLen15
@@ -2754,9 +2803,9 @@ def appendProbNode(probVectP,probVectC,bLen,mutMatrix):
 							tot+=rootFreqs[i]*mutMatrix[i][i1]*entry1[3]*mutMatrix[i][i2]*bLen15
 					totalFactor*=(tot/rootFreqs[i1])
 				else:
-					totalFactor*=(mutMatrix[allelesLow[ref[pos-1]]][alleles[entry2[0]]]*(bLen+entry1[3]))
+					totalFactor*=(mutMatrix[allelesLow[ref[pos-1]]][alleles[entry2[0]]]*(bLen+entry1[3]+entry2[3]))
 		elif entry1[0]=="O":
-			bLen13=bLen+entry1[3]
+			bLen13=bLen+entry1[3]+entry2[3]
 			if entry2[0]=="O":
 				tot=0.0
 				for j in range4:
@@ -2773,16 +2822,16 @@ def appendProbNode(probVectP,probVectC,bLen,mutMatrix):
 			i1=alleles[entry1[0]]
 			if entry2[0]==entry1[0]:
 				if entry1[4]:
-					Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3]+entry1[5])
+					Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3]+entry1[5]+entry2[3])
 				else:
-					Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3])
+					Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3]+entry2[3])
 			else:
 				if entry2[0]=="O":
 					if entry1[4]:
 						#if entry2[4][i1]>0.5:
 						#	Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3]+entry1[5])
 						#else:
-							bLen15=bLen+entry1[5]
+							bLen15=bLen+entry1[5]+entry2[3]
 							tot=0.0
 							for i in range4:
 								if i1==i:
@@ -2796,7 +2845,7 @@ def appendProbNode(probVectP,probVectC,bLen,mutMatrix):
 						#	Lkcost+=mutMatrix[i1][i1]*(bLen+entry1[3])
 						#else:
 							tot=0.0
-							bLen13=bLen+entry1[3]
+							bLen13=bLen+entry1[3]+entry2[3]
 							for j in range4:
 								#if entry2[4][j]>0.5:
 									if i1==j:
@@ -2811,9 +2860,25 @@ def appendProbNode(probVectP,probVectC,bLen,mutMatrix):
 					else:
 						i2=alleles[entry2[0]]
 					if entry1[4]:
-						totalFactor*=((rootFreqs[i1]*mutMatrix[i1][i2]*(bLen+entry1[5]) + rootFreqs[i2]*mutMatrix[i2][i1]*entry1[3] + entry1[3]*(bLen+entry1[5])*(rootFreqs[0]*mutMatrix[0][i1]*mutMatrix[0][i2]+rootFreqs[1]*mutMatrix[1][i1]*mutMatrix[1][i2]+rootFreqs[2]*mutMatrix[2][i1]*mutMatrix[2][i2]+rootFreqs[3]*mutMatrix[3][i1]*mutMatrix[3][i2]) )/rootFreqs[i1])
+						totalFactor*=((rootFreqs[i1]*mutMatrix[i1][i2]*(bLen+entry1[5]+entry2[3]) + rootFreqs[i2]*mutMatrix[i2][i1]*entry1[3] + entry1[3]*(bLen+entry1[5]+entry2[3])*(rootFreqs[0]*mutMatrix[0][i1]*mutMatrix[0][i2]+rootFreqs[1]*mutMatrix[1][i1]*mutMatrix[1][i2]+rootFreqs[2]*mutMatrix[2][i1]*mutMatrix[2][i2]+rootFreqs[3]*mutMatrix[3][i1]*mutMatrix[3][i2]) )/rootFreqs[i1])
 					else:
-						totalFactor*=(mutMatrix[i1][i2]*(bLen+entry1[3]))
+						totalFactor*=(mutMatrix[i1][i2]*(bLen+entry1[3]+entry2[3]))
+		
+		if totalFactor<=minimumCarryOver:
+			if totalFactor<sys.float_info.min:
+				return float("-inf")
+			# print("Reached threshold and moving to log space.")
+			# print(totalFactor)
+			# print(bLen)
+			# print(entry1)
+			# print(entry2)
+			# print(ref[pos-1])
+			# if totalFactor<sys.float_info.min:
+			# 	print(mutMatrix[allelesLow[ref[pos-1]]][alleles[entry2[0]]])
+			# 	print((bLen+entry1[3]))
+			# 	print((mutMatrix[allelesLow[ref[pos-1]]][alleles[entry2[0]]]*(bLen+entry1[3])))
+			Lkcost+=log(totalFactor)
+			totalFactor=1.0
 
 		pos+=length
 		if pos>lRef:
@@ -2833,6 +2898,12 @@ def appendProbNode(probVectP,probVectC,bLen,mutMatrix):
 	if totalFactor>sys.float_info.min:
 		return Lkcost+log(totalFactor)
 	else:
+		#print("returning -inf at appendProbNode")
+		#print(totalFactor)
+		#print(Lkcost)
+		#print(bLen)
+		#print(probVectP)
+		#print(probVectC)
 		return float("-inf")
 
 
@@ -2840,6 +2911,7 @@ def appendProbNode(probVectP,probVectC,bLen,mutMatrix):
 
 #crawl down the tree, carrying over the updated probability vector after removing a branch/node, and updating the vectors that we encounter
 # in order to look for the best new placement of the removed branch/node.
+#NOT IN USE
 def crawlDown(node,vectUp,vectDistance,removedPartials,removedBLen,isFirst,needsUpdating,parentNodeProb,parentNode,failedPasses,mutMatrix):
 	#now append directly at the node
 	if node.dist>thresholdProb2:
@@ -2921,6 +2993,7 @@ def crawlDown(node,vectUp,vectDistance,removedPartials,removedBLen,isFirst,needs
 
 #crawl up the tree (also branching downward), carrying over the updated probability vector after removing a branch/node, and updating the vectors that we encounter
 # in order to look for the best new placement of the removed branch/node.
+#NOT IN USE
 def crawlUp(node,child,vectDown,vectDistance,removedPartials,removedBLen,needsUpdating,childNodeProb,failedPasses,mutMatrix):
 	if node.dist>thresholdProb2 or node.up==None: #append directly at the node
 		if needsUpdating:
@@ -3374,7 +3447,7 @@ def placeSampleOnTreeTopology(node,newPartials,appendedNode,bLen,newBranchL,newC
 					break
 				newSplit=bestSplit/2
 		#now try different lengths for the new branch
-		childBestVect=shorten(childBestVect)
+		#childBestVect=shorten(childBestVect)
 		LK1=bestSplitLK
 		bestLen=newBranchL
 		#print("Initial bLen: "+str(bestLen)+" and LK: "+str(LK1))
@@ -3433,7 +3506,7 @@ def placeSampleOnTreeTopology(node,newPartials,appendedNode,bLen,newBranchL,newC
 		newVect=mergeVectors(node.probVect,node.dist,newPartials,bestLen,mutMatrix)
 		newInternalNode.probVect=newVect
 		newVect=mergeVectorsUpDown(vectUp,distTop/2,newInternalNode.probVect,distTop/2,mutMatrix)
-		newVect=shorten(newVect)
+		#newVect=shorten(newVect)
 		newInternalNode.probVectTotUp=newVect
 		newVect=mergeVectorsUpDown(childBestVect,0.0,newPartials,bestLen,mutMatrix)
 		if newVect==None:
@@ -3442,7 +3515,7 @@ def placeSampleOnTreeTopology(node,newPartials,appendedNode,bLen,newBranchL,newC
 			print(childBestVect)
 			print(newPartials)
 			print(bestLen)
-		newVect=shorten(newVect)
+		#newVect=shorten(newVect)
 		newInternalNode.probVectTot=newVect
 		if verbose:
 			print("new internal node added to tree")
@@ -3597,7 +3670,7 @@ def placeSampleOnTreeTopology(node,newPartials,appendedNode,bLen,newBranchL,newC
 			else:
 				child=1
 				vectUp=bestDownNode.up.probVectUpLeft
-			childBestVect=shorten(childBestVect)
+			#childBestVect=shorten(childBestVect)
 
 			LK1=bestChildLK
 			bestLen=newBranchL
@@ -3652,10 +3725,10 @@ def placeSampleOnTreeTopology(node,newPartials,appendedNode,bLen,newBranchL,newC
 			newVect=mergeVectors(bestDownNode.probVect,bestDownNode.dist,newPartials,bestLen,mutMatrix)
 			newInternalNode.probVect=newVect
 			newVect=mergeVectorsUpDown(vectUp,distTop/2,newInternalNode.probVect,distTop/2,mutMatrix)
-			newVect=shorten(newVect)
+			#newVect=shorten(newVect)
 			newInternalNode.probVectTotUp=newVect
 			newVect=mergeVectorsUpDown(childBestVect,0.0,newPartials,bestLen,mutMatrix)
-			newVect=shorten(newVect)
+			#newVect=shorten(newVect)
 			newInternalNode.probVectTot=newVect
 			if distTop>4*bLen/(bLenFactor+thresholdProb):
 				createFurtherMidNodes(newInternalNode,vectUp,bLen)
@@ -3919,10 +3992,10 @@ def placeSampleOnTreeTopology(node,newPartials,appendedNode,bLen,newBranchL,newC
 				newVect=mergeVectorsUpDown(vectUp,newInternalNode.dist,newPartials,bestLen,mutMatrix)
 				newInternalNode.probVectUpRight=newVect
 				newVect=mergeVectorsUpDown(vectUp,distTop/2,newInternalNode.probVect,distTop/2,mutMatrix)
-				newVect=shorten(newVect)
+				#newVect=shorten(newVect)
 				newInternalNode.probVectTotUp=newVect
 				newVect=mergeVectorsUpDown(parentBestVect,0.0,newPartials,bestLen,mutMatrix)
-				newVect=shorten(newVect)
+				#newVect=shorten(newVect)
 				newInternalNode.probVectTot=newVect
 				if distTop>4*bLen/(bLenFactor+thresholdProb):
 					createFurtherMidNodes(newInternalNode,vectUp,bLen)
@@ -4113,7 +4186,16 @@ def traverseTreeForTopologyUpdate(node,bLen,mutMatrix):
 					print("Strange, LK cost is positive")
 					exit()
 				elif bestLKdiff<-1000000000:
-					print("Found likelihood cost is very heavy")
+					print("Error: found likelihood cost is very heavy, this might mean that the reference used is not the same used to generate the input diff file")
+					print(bestLKdiff)
+					print(bestCurrentLK)
+					print(vectUp)
+					print(node.probVect)
+					print(node.dist)
+					print(bestCurrenBLen)
+					print(parentNode.probVectTot)
+					print(node.probVectTot)
+					exit()
 				if bestLKdiff+thresholdTopologyPlacement>bestCurrentLK:
 					if bestNodeSoFar==parentNode:
 						print("Strange, re-placement is at same node")
@@ -4203,47 +4285,137 @@ def startTopologyUpdates(node,bLen,mutMatrix):
 				print("Processed topology for "+str(numNodes)+" nodes.")
 	return newRoot,totalImprovement
 
-
+#set all descendant nodes to dirty
+def setAllDirty(node):
+	nextLeaves=[node]
+	#node.dirty=True
+	while len(nextLeaves)>0:
+		nextNode=nextLeaves.pop()
+		nextNode.dirty=True
+		for c in nextNode.children:
+			nextLeaves.append(c)
+			#setAllDirty(c)
 
 def createNewick(node):
-	if node.children:
-		return "("+createNewick(node.children[0])+","+createNewick(node.children[1])+"):"+str(node.dist)
-	else:
-		if len(node.minorSequences)>0:
-			newList=["(",node.name,":0"]
-			for s2 in node.minorSequences:
-				newList.append(","+s2+":0")
-			newList.append("):"+str(node.dist))
-			return "".join(newList)
-			#treeString=treeString.replace(s.name+":",newString)
+	nextNode=node
+	stringList=[]
+	direction=0
+	while nextNode!=None:
+		if nextNode.children:
+			if direction==0:
+				stringList.append("(")
+				nextNode=nextNode.children[0]
+			elif direction==1:
+				stringList.append(",")
+				nextNode=nextNode.children[1]
+				direction=0
+			else:
+				stringList.append("):"+str(nextNode.dist))
+				if nextNode.up!=None:
+					if nextNode.up.children[0]==nextNode:
+						direction=1
+					else:
+						direction=2
+				nextNode=nextNode.up
 		else:
-			return node.name+":"+str(node.dist)
+			if len(nextNode.minorSequences)>0:
+				stringList.append("("+nextNode.name+":0")
+				for s2 in nextNode.minorSequences:
+					stringList.append(","+s2+":0")
+				stringList.append("):"+str(nextNode.dist))
+			else:
+				stringList.append(nextNode.name+":"+str(nextNode.dist))
+			if nextNode.up!=None:
+				if nextNode.up.children[0]==nextNode:
+					direction=1
+				else:
+					direction=2
+			nextNode=nextNode.up
+	stringList.append(";")
+	return "".join(stringList)
+	# if node.children:
+	# 	return "("+createNewick(node.children[0])+","+createNewick(node.children[1])+"):"+str(node.dist)
+	# else:
+	# 	if len(node.minorSequences)>0:
+	# 		newList=["(",node.name,":0"]
+	# 		for s2 in node.minorSequences:
+	# 			newList.append(","+s2+":0")
+	# 		newList.append("):"+str(node.dist))
+	# 		return "".join(newList)
+	# 	else:
+	# 		return node.name+":"+str(node.dist)
 
 def createBinaryNewick(node):
-	if node.children:
-		if node.dist>thresholdProb:
-			return "("+createBinaryNewick(node.children[0])+","+createBinaryNewick(node.children[1])+"):"+str(node.dist)
-		else:
-			return "("+createBinaryNewick(node.children[0])+","+createBinaryNewick(node.children[1])+"):"+str(thresholdProb)
-	else:
-		if len(node.minorSequences)>0:
-			newList=[]
-			for i in node.minorSequences:
-				newList.append("(")
-			newList.append(node.name+":")
-			for s2 in node.minorSequences:
-				newList.append(str(thresholdProb)+","+s2+":"+str(thresholdProb)+"):")
-			if node.dist>thresholdProb:
-				newList.append(str(node.dist))
+	nextNode=node
+	stringList=[]
+	direction=0
+	while nextNode!=None:
+		if nextNode.children:
+			if direction==0:
+				stringList.append("(")
+				nextNode=nextNode.children[0]
+			elif direction==1:
+				stringList.append(",")
+				nextNode=nextNode.children[1]
+				direction=0
 			else:
-				newList.append(str(thresholdProb))
-			return "".join(newList)
-			#treeString=treeString.replace(s.name+":",newString)
+				if nextNode.dist>thresholdProb:
+					stringList.append("):"+str(nextNode.dist))
+				else:
+					stringList.append("):"+str(thresholdProb))
+				if nextNode.up!=None:
+					if nextNode.up.children[0]==nextNode:
+						direction=1
+					else:
+						direction=2
+				nextNode=nextNode.up
 		else:
-			if node.dist>thresholdProb:
-				return node.name+":"+str(node.dist)
+			if len(nextNode.minorSequences)>0:
+				for i in nextNode.minorSequences:
+					stringList.append("(")
+				stringList.append(nextNode.name+":")
+				for s2 in nextNode.minorSequences:
+					stringList.append(str(thresholdProb)+","+s2+":"+str(thresholdProb)+"):")
+				if nextNode.dist>thresholdProb:
+					stringList.append(str(nextNode.dist))
+				else:
+					stringList.append(str(thresholdProb))
 			else:
-				return node.name+":"+str(thresholdProb)
+				if nextNode.dist>thresholdProb:
+					stringList.append(nextNode.name+":"+str(nextNode.dist))
+				else:
+					stringList.append(nextNode.name+":"+str(thresholdProb))
+			if nextNode.up!=None:
+				if nextNode.up.children[0]==nextNode:
+					direction=1
+				else:
+					direction=2
+			nextNode=nextNode.up
+	stringList.append(";")
+	return "".join(stringList)
+	# if node.children:
+	# 	if node.dist>thresholdProb:
+	# 		return "("+createBinaryNewick(node.children[0])+","+createBinaryNewick(node.children[1])+"):"+str(node.dist)
+	# 	else:
+	# 		return "("+createBinaryNewick(node.children[0])+","+createBinaryNewick(node.children[1])+"):"+str(thresholdProb)
+	# else:
+		# if len(node.minorSequences)>0:
+		# 	newList=[]
+		# 	for i in node.minorSequences:
+		# 		newList.append("(")
+		# 	newList.append(node.name+":")
+		# 	for s2 in node.minorSequences:
+		# 		newList.append(str(thresholdProb)+","+s2+":"+str(thresholdProb)+"):")
+		# 	if node.dist>thresholdProb:
+		# 		newList.append(str(node.dist))
+		# 	else:
+		# 		newList.append(str(thresholdProb))
+		# 	return "".join(newList)
+		# else:
+		# 	if node.dist>thresholdProb:
+		# 		return node.name+":"+str(node.dist)
+		# 	else:
+		# 		return node.name+":"+str(thresholdProb)
 
 
 
@@ -4406,7 +4578,7 @@ if runOnlyExample:
 	exit()
 
 file=open(outputFile+"_tree.tree","w")
-file.write(newickString+";")
+file.write(newickString)
 file.close()
 file=open(outputFile+"_subs.txt","w")
 for i in range4:
