@@ -12,6 +12,8 @@ However, it is highly recommended to execute the code using pypy3 to achieve bes
 To install pypy3, see https://www.pypy.org/ .
 If pypy3 cannot be installed, it is also possible to execute it with python3, but this will usually be slower.
 
+The package includes an example diff file (diffFile_repeat1_100samples_Ns.txt) of simulate genomes.
+
 The package also includes other scripts, for example createDiffFile.py can translate a fasta file into a concise alignment ("diff") file.
 
 calculateFastLK.py contains code for calculating the likelihood (but not estimating a phylogeny) on short-branched trees.
