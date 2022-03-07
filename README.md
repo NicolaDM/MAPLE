@@ -1,4 +1,4 @@
-# fastLK
+# MAPLE
 
 Code for fast likelihood calculation in the case of short-branched trees.
 
