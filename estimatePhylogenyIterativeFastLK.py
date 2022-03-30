@@ -72,11 +72,9 @@ if not os.path.isfile(refFile):
 lineSplit=outputFile.split("/")
 lineSplit[-1]=""
 outFolder="/".join(lineSplit)
-print(outFolder)
 if not os.path.isdir(outFolder):
 	print("Path to output file "+outFolder+" does not exist, quitting MAPLE tree inference. Use option --output to specify a valid output file path and output file name.")
 	exit()
-exit()
 
 class Tree(object):
 	def __init__(self, name='', children=None, dist=1.0):
