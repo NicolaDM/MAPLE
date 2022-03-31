@@ -1,17 +1,12 @@
 import sys
 import os
-import math
-import numpy as np
 from os import path
 import argparse
-from Bio.Data import CodonTable
-table = CodonTable.ambiguous_dna_by_id[1]
-from Bio.Seq import _translate_str
 import time
 
 #©EMBL-European Bioinformatics Institues, 2021
 
-#Translate fasta alignment into diff file.
+#Translate fasta alignment into diff (MAPLE format) file.
 #Example run command line: python3 createDiffsFile.py --path /pathToFolder/ --reference EPI_ISL_402124_lowercase.fasta --fasta 2021-03-31_unmasked.fa --output 2021-03-31_unmasked_differences.txt
 
 parser = argparse.ArgumentParser(description='Translate fasta alignment into a diff file.')
@@ -19,12 +14,29 @@ parser.add_argument('--path',default="", help='path where to find and write file
 parser.add_argument('--reference',default="EPI_ISL_402124_lowercase.fasta", help='name of the reference sequence file within the --path.')
 parser.add_argument("--fasta",default="2021-03-31_unmasked.fa", help="name of the input fasta alignment file.")
 parser.add_argument("--output",default="2021-03-31_unmasked_differences.txt", help="name of the output diff file.")
+parser.add_argument("--overwrite", help="Overwrite previous Maple file with the same output name if already present.", action="store_true")
 args = parser.parse_args()
 
 pathSimu=args.path
 reference=args.reference
 fasta=args.fasta
 output=args.output
+overwrite=args.overwrite
+
+if not os.path.isdir(pathSimu):
+	print("Path "+pathSimu+" does not exist, quitting creatDiffsFile.py . Use option --path to specify a valid path for input and output files location.")
+	exit()
+if not os.path.isfile(pathSimu+fasta):
+	print("Input file in fasta format "+pathSimu+fasta+" not found, quitting creatDiffsFile.py . Use option --fasta to specify a valid input fasta file name to be found within the folder spcefified by option --path .")
+	exit()
+if not os.path.isfile(pathSimu+reference):
+	print("Input reference fasta file "+pathSimu+reference+" not found, quitting creatDiffsFile.py . Use option --reference to specify a valid input reference file name to be found within the folder spcefified by option --path .")
+	exit()
+if os.path.isfile(pathSimu+output)  and (not overwrite):
+	print("File "+pathSimu+output+" already exists, quitting creatDiffsFile.py . Use option --overwrite if you want to overwirte files previously created.")
+	exit()
+
+
 
 alleles={"A":0,"C":1,"G":2,"T":3}
 allelesList=["A","C","G","T"]
@@ -43,6 +55,7 @@ def collectReference(fileName):
 	lRef=len(ref)
 	print("Ref genome length: "+str(lRef))
 	file.close()
+	ref=ref.lower()
 	return ref
 
 
@@ -56,7 +69,11 @@ fileI=open(pathSimu+fasta)
 fileO=open(pathSimu+output,"w")
 line=fileI.readline()
 nSeqs=0
-while line!="" and line!="\n":
+while line!="":
+	while line=="\n":
+		line=fileI.readline()
+	if line=="":
+		break
 	nSeqs+=1
 	seq=""
 	name=line.replace(">","").replace("\n","")
@@ -66,12 +83,13 @@ while line!="" and line!="\n":
 		seq+=line.replace("\n","")
 		line=fileI.readline()
 	if len(seq)!=lRef:
-		print("Seq "+name+" has length "+str(len(seq))+" while ref is "+str(lRef))
+		print("Seq "+name+" has length "+str(len(seq))+" while reference is "+str(lRef))
 		exit()
 	# state 0=ref; 1=N; 2=-; 
 	state=0
 	seqList=[]
 	length=0
+	seq=seq.lower()
 	for i in range(lRef):
 		if state==1:
 			if seq[i]=="n":
