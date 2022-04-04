@@ -4472,6 +4472,7 @@ numSamples=0
 for d in distances:
 	numSamples+=1
 	sample=d[1]
+	#print(sample)
 	newPartials=probVectTerminalNode(data[sample],0.0)
 	# if runOnlyExample:
 	# 	print("Placing sample "+sample)
