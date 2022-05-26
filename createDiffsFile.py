@@ -105,13 +105,13 @@ while line!="":
 				seqList.append(("-",i+1-length,length))
 				length=0
 				state=0
-		elif seq[i]=="n" and state!=1:
+		if seq[i]=="n" and state!=1:
 			length=1
 			state=1
 		elif seq[i]=="-" and state!=2:
 			length=1
 			state=2
-		if seq[i]!=ref[i] and seq[i]!="-" and seq[i]!="n":
+		elif seq[i]!=ref[i] and seq[i]!="-" and seq[i]!="n":
 			seqList.append((seq[i],i+1))
 	if state==1:
 			seqList.append(("n",lRef+1-length,length))
