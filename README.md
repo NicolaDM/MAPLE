@@ -1,9 +1,8 @@
 # MAPLE
 
-Code for fast likelihood calculation in the case of short-branched trees.
+The code in this repository implements the MAPLE approach for phylogenetic maximum likelihood estimation for genomic epidemiology datasets.
 
-The main script is estimatePhylogenyIterativeFastLK.py which estimates a phylogenetic tree starting from a concise alignment ("MAPLE") file.
-Typical use is:
+The main script ("MAPLEv...py") takes in input a reference genome, an alignment file in MAPLE format (see file )
 
 pypy3 estimatePhylogenyIterativeFastLK.py --reference MN908947.3.fasta --input inputDiffFile.txt --model UNREST --numTopologyImprovements 3 --overwrite  --output fastLK_outputFile
 
