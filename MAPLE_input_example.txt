@@ -1,0 +1,19 @@
+>reference
+AAAACCCCGGGGTTTT
+>Sample1
+C	3
+-	5	4
+C	12
+A	13
+>Sample2
+C	3
+C	12
+A	13
+>Sample3
+-	5	4
+C	12
+A	13
+>Sample4
+C	3
+C	12
+A	15
