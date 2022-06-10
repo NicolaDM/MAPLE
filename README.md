@@ -13,6 +13,6 @@ However, it is highly recommended to execute the code using pypy3 to achieve bes
 To install pypy3, see https://www.pypy.org/ .
 If pypy3 cannot be installed, it is also possible to execute it with python3, but this will usually be slower.
 
-The python script "createDiffFile.py" included in the repository can translate a fasta file into a MAPLE format file.
+The python script "createMapleFile.py" included in the repository can translate a fasta file into a MAPLE format file.
 
 ©EMBL-European Bioinformatics Institues, 2021
