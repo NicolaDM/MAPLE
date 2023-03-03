@@ -81,7 +81,33 @@ It is necessary that the names in the file used for --assignmentFile are contain
 
 ### Benchmarking
 
-
+We also include in this repository a script that we used to run benchmarking analyses of MAPLE: MAPLE_benchmarking.py .
+Comments at the top of this script will give instructions on how to use it within the context of benchmark analyses.
+In short:
+1) First obtain a tree, for example from http://hgdownload.soe.ucsc.edu/goldenPath/wuhCor1/UShER_SARS-CoV-2/ , and simulate genome evolution along the tree, for example using phastSim https://github.com/NicolaDM/phastSim .
+2) If needed, add ambiguities to the simulated alignment and extract the tree where mutation-less branches are collapsed with
+    pypy3 MAPLE_benchmarking.py --createTotalData
+3) Create files containing subsamples of the global alignments using
+    pypy3 MAPLE_benchmarking.py --createBashScript
+    sh createSubsampleInputFiles.sh
+(the latter command parallelizes file creating with bsub on a computational cluster).
+4) For any subsample size (here 100000 as an example), first create the corresponding bash scripts with
+    pypy3 MAPLE_benchmarking.py --createBashScript --numSamples 100000
+   and then submit execution of phylogenetic inference for all methods using
+    sh submitUShER.sh ; sh submitFastTree.sh ; sh submitIQtree.sh ; sh submitRAxML.sh ; sh submitRAxML-NG.sh ; sh submitMaple.sh
+   when execution of UShER is finished, run matOptimize:
+    sh submitmatOptimize.sh 
+   and when this is finished, convert the output to newick:
+    sh submitMatOptimizeConversion.sh
+5) When the phylogenetic ineference methods are finished, run data collection on the results (measure execution time/memory, RF distances, etc):
+    sh submitIQtreeLK_UShER.sh ; sh submitMapleLK_UShER.sh ; sh submitRF_UShER.sh ; sh submitParsimony_UShER.sh ; sh submitIQtreeLK_matOptimize.sh ; sh submitMapleLK_matOptimize.sh ; sh submitRF_matOptimize.sh ; sh submitParsimony_matOptimize.sh ; sh submitIQtreeLK_IQtree.sh ; sh submitMapleLK_IQtree.sh ; sh submitRF_IQtree.sh ; sh submitParsimony_IQtree.sh ; sh submitIQtreeLK_FastTree.sh ; sh submitMapleLK_FastTree.sh ; sh submitRF_FastTree.sh ; sh submitParsimony_FastTree.sh ; sh submitIQtreeLK_RAxML.sh ; sh submitMapleLK_RAxML.sh ; sh submitRF_RAxML.sh ; sh submitParsimony_RAxML.sh ; sh submitIQtreeLK_RAxML-NG.sh ; sh submitMapleLK_RAxML-NG.sh ; sh submitRF_RAxML-NG.sh ; sh submitParsimony_RAxML-NG.sh ; sh submitIQtreeLK_Maple.sh ; sh submitMapleLK_Maple.sh ; sh submitRF_Maple.sh ; sh submitParsimony_Maple.sh
+6) Then to collect all results run:
+    pypy3 MAPLE_benchmarking.py --collectResults
+   The to prepare the input files for figure generation:
+    pypy3 MAPLE_benchmarking.py --createFigures
+   And finally to generate the figures (will require matplotlib)
+    python3 MAPLE_benchmarking.py --runFigureGeneration
+    
 
 
 <br />
