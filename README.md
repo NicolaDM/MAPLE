@@ -86,13 +86,19 @@ Comments at the top of this script will give instructions on how to use it withi
 In short:
 1) First obtain a tree, for example from http://hgdownload.soe.ucsc.edu/goldenPath/wuhCor1/UShER_SARS-CoV-2/ , and simulate genome evolution along the tree, for example using phastSim https://github.com/NicolaDM/phastSim .
 2) If needed, add ambiguities to the simulated alignment and extract the tree where mutation-less branches are collapsed with
+
         pypy3 MAPLE_benchmarking.py --createTotalData
+        
 3) Create files containing subsamples of the global alignments using
+
         pypy3 MAPLE_benchmarking.py --createBashScript
         sh createSubsampleInputFiles.sh
+        
 (the latter command parallelizes file creating with bsub on a computational cluster).
 4) For any subsample size (here 100000 as an example), first create the corresponding bash scripts with
+
         pypy3 MAPLE_benchmarking.py --createBashScript --numSamples 100000
+        
 and then submit execution of phylogenetic inference for all methods using
         sh submitUShER.sh ; sh submitFastTree.sh ; sh submitIQtree.sh ; sh submitRAxML.sh ; sh submitRAxML-NG.sh ; sh submitMaple.sh
 when execution of UShER is finished, run matOptimize:
@@ -113,4 +119,4 @@ And finally to generate the figures (will require matplotlib)
 <br />
 <br />
 <br />
-©EMBL-European Bioinformatics Institues, 2021
+©EMBL-European Bioinformatics Institute, 2023
