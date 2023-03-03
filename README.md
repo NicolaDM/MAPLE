@@ -100,18 +100,31 @@ In short:
         pypy3 MAPLE_benchmarking.py --createBashScript --numSamples 100000
         
 and then submit execution of phylogenetic inference for all methods using
+
         sh submitUShER.sh ; sh submitFastTree.sh ; sh submitIQtree.sh ; sh submitRAxML.sh ; sh submitRAxML-NG.sh ; sh submitMaple.sh
+        
 when execution of UShER is finished, run matOptimize:
-        sh submitmatOptimize.sh 
+
+        sh submitmatOptimize.sh
+        
 and when this is finished, convert the output to newick:
+
         sh submitMatOptimizeConversion.sh
+        
 5) When the phylogenetic ineference methods are finished, run data collection on the results (measure execution time/memory, RF distances, etc):
+
         sh submitIQtreeLK_UShER.sh ; sh submitMapleLK_UShER.sh ; sh submitRF_UShER.sh ; sh submitParsimony_UShER.sh ; sh submitIQtreeLK_matOptimize.sh ; sh submitMapleLK_matOptimize.sh ; sh submitRF_matOptimize.sh ; sh submitParsimony_matOptimize.sh ; sh submitIQtreeLK_IQtree.sh ; sh submitMapleLK_IQtree.sh ; sh submitRF_IQtree.sh ; sh submitParsimony_IQtree.sh ; sh submitIQtreeLK_FastTree.sh ; sh submitMapleLK_FastTree.sh ; sh submitRF_FastTree.sh ; sh submitParsimony_FastTree.sh ; sh submitIQtreeLK_RAxML.sh ; sh submitMapleLK_RAxML.sh ; sh submitRF_RAxML.sh ; sh submitParsimony_RAxML.sh ; sh submitIQtreeLK_RAxML-NG.sh ; sh submitMapleLK_RAxML-NG.sh ; sh submitRF_RAxML-NG.sh ; sh submitParsimony_RAxML-NG.sh ; sh submitIQtreeLK_Maple.sh ; sh submitMapleLK_Maple.sh ; sh submitRF_Maple.sh ; sh submitParsimony_Maple.sh
+        
 6) Then to collect all results run:
+
         pypy3 MAPLE_benchmarking.py --collectResults
-The to prepare the input files for figure generation:
+        
+Then to prepare the input files for figure generation:
+
         pypy3 MAPLE_benchmarking.py --createFigures
-And finally to generate the figures (will require matplotlib)
+        
+And finally to generate the figures (will require matplotlib):
+
         python3 MAPLE_benchmarking.py --runFigureGeneration
     
 
