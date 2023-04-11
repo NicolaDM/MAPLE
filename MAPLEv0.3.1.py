@@ -1,3 +1,4 @@
+#! /usr/bin/env pypy3
 import sys
 from math import log
 import argparse
