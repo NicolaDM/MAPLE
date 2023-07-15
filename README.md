@@ -67,6 +67,10 @@ The total likelihood of the final tree can be calculated using option --calculat
 As of version 0.3.1, MAPLE can model sequence errors by assigning an error probability free parameter to each genome position. Using option --estimateSiteSpecificErrorRate MAPLE will estimate these error probabilities and perform phylogenetic inference while accounting for these.
 
 
+### Branch support
+
+As of version 0.3.3, MAPLE can estimate branch support with a new pandemic-scale approach (SPRTA, manuscript in prep.) using option --SPRTA.
+
 
 ### Lineage assignment
 
@@ -76,6 +80,8 @@ To perform this analysis, run for example:
     pypy3 MAPLEv0.2.1.py --inputTree inputTreeFile.tree --assignmentFile pango_consensus_sequences.maple --output MAPLE_outputFile 
 
 It is necessary that the names in the file used for --assignmentFile are contained in the input tree as sample names.
+
+As of version 0.3.3 MAPLE can perform lineage assignment while also accounting for phylogenetic uncertainty via SPRTA branch support assessment. To do this, perform lineage assignment using also option --inputNexusTree providing as input the nexus tree from a previous MAPLE run where you estimated SPRTA branch support.
 
 
 
