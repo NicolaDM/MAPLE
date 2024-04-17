@@ -1,20 +1,20 @@
 # MAPLE
 
 MAPLE is a new approach for maximum likelihood phylogenetic estimation for genomic epidemiology, or otherwise for datasets with short divergence.
-For a description of the methods used, see https://doi.org/10.1101/2022.03.22.485312
+For a description of the methods used, see [https://doi.org/10.1101/2022.03.22.485312](https://www.nature.com/articles/s41588-023-01368-0)
 
 
 ### Installation
 
 The code doesn't need installation: just download the latest python script (MAPLEv...py) and use it to run MAPLE.
 It is strongly recommended to execute the code using pypy3 to achieve best performance; running MAPLE without pypy3 might result in about 10 times longer runtime.
-To install pypy3, see https://www.pypy.org/ .
+To install pypy3, see https://www.pypy.org/ . It is recommended that you use at least pypy v3.10 if you want to use parallelization in python.
 If pypy3 cannot be installed, it is also possible to execute it with python3, but be aware that it will be substantially slower.
 
 
 ### Basic usage
 
-The main script ("MAPLEv...py") takes in input a reference genome, and an alignment file in MAPLE format (see e.g. file "MAPLE_input_example.txt"), and estimates a maximum likelihood phylogeny. For example, if both the reference and the alignment are contained in the same input file, with the reference first, as in the example file MAPLE_input_example.txt contained in this repository, then the standard usage to perform pylogenetic tree estimation would be:
+The main script ("MAPLEv...py") takes in input an alignment file in MAPLE format (see e.g. file "MAPLE_input_example.txt"), and estimates a maximum likelihood phylogeny. For example, if both the reference and the alignment are contained in the same input file, with the reference first, as in the example file MAPLE_input_example.txt contained in this repository, then the standard usage to perform pylogenetic tree estimation would be:
 
     pypy3 MAPLEv0.2.1.py --input inputMapleFile.txt --output MAPLE_outputFile
 
