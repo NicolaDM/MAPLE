@@ -50,6 +50,23 @@ In summary, to run the most advanced model in MAPLE, you can use options
 Further, when using the sequence error model in MAPLE, it is possible to estimate individual sequence errors in the input alignment with option --estimateErrors . An output file will then contain estimated sequence errors, each with its posterior probability of being an error.
 
 
+### Parallelization
+
+The most time-demanding part of MAPLE is the SPR search to improve the topology of the initial tree.
+SPR search can now be run in parallel in MAPLE using multiple cores using option --numCores . For example:
+
+    pypy3 MAPLEv0.6.7.py --input inputMapleFile.txt --output MAPLE_outputFile --numCores 10
+
+will try to parallelize the SPR search over 10 cores. It is not recommended to try to parallelize over an excessive number of cores (e.g. >20) since this can currently deteriorate the method's performance.
+No matter the number of cores used, the initial stepwise addition will still be run sequentially on 1 core.
+
+
+### Inferring mutation events and a mutation-annotated tree
+
+MAPLE can infer mutation events on the final tree (that is, estimate a mutation-annotated tree) using option --estimateMAT .
+Inferred mutations will be annotated with posterior probabilities, so that the same mutation might be annotated on multiple branches in case of non-negligeable uncertainty in its inference.
+
+
 ### Branch support
 
 MAPLE can estimate branch support with a new pandemic-scale approach (SPRTA, manuscript in prep.) using option --SPRTA.
@@ -64,7 +81,7 @@ This can be done by running:
     pypy3 MAPLEv0.3.6.py --inputTree inputTreeFile.tree --inputRFtrees otherInputTreeFiles.tree
 
 The tree contained in the file specified with option --inputTree will be compared to all the trees in the file specified with option --inputRFtrees.
-Having multiple trees in this second file is faster than performing one comparison at the time by running MAPLE on only 2 trees at the time.
+Having multiple trees in this second file is faster than running the script many times with 2 trees at the time.
 
 
 
