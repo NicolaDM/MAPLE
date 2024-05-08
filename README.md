@@ -16,21 +16,27 @@ If pypy3 cannot be installed, it is also possible to execute it with python3, bu
 
 The main script ("MAPLEv...py") takes in input an alignment file in MAPLE format (see e.g. file "MAPLE_alignment_example.txt"), containing a reference genome sequence, followed by all the considered genome sequences represented in terms of differences with respect to the reference. MAPLE's basic usage is:
 
-    pypy3 MAPLEv0.6.7.py --input inputMapleFile.txt --output MAPLE_outputFilePrefix
+    pypy3 MAPLEv0.6.8.py --input inputMapleFile.txt --output MAPLE_outputFilePrefix
 
 The --output option is used by MAPLE to name the output files: in this case the final output tree will be named "MAPLE_outputFilePrefix_tree.tree", the file containing the estimated model parameters will be "MAPLE_outputFilePrefix_subs.txt", and so on. You can us option --overwrite to overwrite existing files with those names.
 
 
 ### Creating an input MAPLE alignment file
 
-The python script "createMapleFile.py" included in the repository can be used to translate a fasta alignment file into a MAPLE format alignment file.
+The python script "createMapleFile.py", included in this repository, can be used to translate a fasta alignment file into a MAPLE format alignment file.
+
+We recommend using MAPLE only with closely related genomes. When analysing non-closely related genomes (e.g. branch lengths >0.01) the software will be both slower and less accurate.
+A multiple sequence alignment can be obtained by aligning every considered genome to the same reference, and removing inserted material, for example using MAFFT with options --auto --keeplength --addfragment.
+
+We also recommend masking unreliable genome positions; MAPLE includes a substitution model that can be used to infer these positions, see below the section "Substitution models".
+Finally, we noticed that it can be useful to mask deletions in the unput alignment, that is, replacing gap "-" characters with reference nucleotides. This is because errors (either alignment or consensus calling) at positions with common deletions can cause high ancestral sequence ancertainty and errors.
 
 
 ### Online tree inference (adding sequences to existing tree)
 
 Given a tree previously estimated, and given an alignment containing the sequences of the samples in the tree, plus possibly some additional sequences, one can use MAPLE to add these additional samples to the given tree, and/or to improve the topology of the input tree. To do this, run:
 
-    pypy3 MAPLEv0.6.7.py --inputTree inputTreeFile.tree --input inputMapleFile.txt --output MAPLE_outputFile
+    pypy3 MAPLEv0.6.8.py --inputTree inputTreeFile.tree --input inputMapleFile.txt --output MAPLE_outputFile
 
 By default, MAPLE will only update the topology of the parts of the tree affected by the addition of the new sequences - this will typically be much faster than running a new inference anew, unless many sequences are added to the tree. In the case one wants to not only add sequences to the tree, but also perform a full topological update, then option --largeUpdate can be used to force an extensive topological search over the whole tree.
 
@@ -45,7 +51,7 @@ Additionally, MAPLE includes a model of heterogeneous recurrent sequence errors,
 
 In summary, to run the most advanced model in MAPLE, you can use options
 
-    pypy3 MAPLEv0.6.7.py --input inputMapleFile.txt --output MAPLE_outputFile --model UNREST --rateVariation --estimateSiteSpecificErrorRate
+    pypy3 MAPLEv0.6.8.py --input inputMapleFile.txt --output MAPLE_outputFile --model UNREST --rateVariation --estimateSiteSpecificErrorRate
 
 Further, when using the sequence error model in MAPLE, it is possible to estimate individual sequence errors in the input alignment with option --estimateErrors . An output file will then contain estimated sequence errors, each with its posterior probability of being an error.
 
@@ -55,9 +61,9 @@ Further, when using the sequence error model in MAPLE, it is possible to estimat
 The most time-demanding part of MAPLE is the SPR search to improve the topology of the initial tree.
 SPR search can now be run in parallel in MAPLE using multiple cores using option --numCores . For example:
 
-    pypy3 MAPLEv0.6.7.py --input inputMapleFile.txt --output MAPLE_outputFile --numCores 10
+    pypy3 MAPLEv0.6.8.py --input inputMapleFile.txt --output MAPLE_outputFile --numCores 10
 
-will try to parallelize the SPR search over 10 cores. It is not recommended to try to parallelize over an excessive number of cores (e.g. >20) since this can currently deteriorate the method's performance.
+will parallelize the SPR search over 10 cores. It is not recommended to try to parallelize over an excessive number of cores (e.g. >20) since this can currently deteriorate the method's performance.
 No matter the number of cores used, the initial stepwise addition will still be run sequentially on 1 core.
 
 
@@ -70,7 +76,15 @@ Inferred mutations will be annotated with posterior probabilities, so that the s
 ### Branch support
 
 MAPLE can estimate branch support with a new pandemic-scale approach (SPRTA, manuscript in prep.) using option --SPRTA.
+MAPLE will then approximate the posterior probabilities of branches in the tree with positive length.
+Note that these are not intended as the posterior brobabilities of clades, but rather the posterior probabilities of branches intended as placements of ancestral genomes, which often can be interpreted as a support for the inferred genome evolution history.
+For example, MAPLE will also assign support values to terminal branches of the tree - these are interpreted as placement probabilities for the considered genome sequences.
 
+An advantage of the SPRTA approach in MAPLE is that its output can be interpreted as a phylogenetic network: for each tree branch we not only define a support score, but also a list of alternative placements for that branch (other branches in the tree where the considered ancestral genome might have evolved from), each with its own estimated support probability. This network-like output can be obtained with option --networkOutput , for example:
+
+    pypy3 MAPLEv0.6.8.py --input inputMapleFile.txt --output MAPLE_outputFile --SPRTA --networkOutput
+
+Please note however that SPRTA is not compatible with parallelization, that is, it can so far only be run sequentially, it is not therefore possible to use options --SPRTA and --numCores in the same MAPLE run.
 
 
 ### Robinson-Foulds distance calculation
