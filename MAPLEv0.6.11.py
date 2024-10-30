@@ -5718,7 +5718,8 @@ def findBestParentForNewSample(tree,root,diffs,sample):
 		if comparison==1:
 			minorSequences[root].append(sample)
 			#TODO
-			nDesc0[root]+=1
+			if HnZ:
+				nDesc0[root]+=1
 			numMinorsFound[0]+=1
 			return root, 1.0, None, diffs
 		elif comparison==2:
