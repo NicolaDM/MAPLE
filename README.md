@@ -48,15 +48,18 @@ By default, MAPLE will only update the topology of the parts of the tree affecte
 
 So far we have implemented only nucleotide substitution models JC69, GTR, and UNREST. The model can be specified by the user with option --model.
 
-We have now also developed in MAPLE a model of rate variation. This model assigns a free rate parameter to each genome positions; since this model is parameter-rich, its use is recommended only for larger datasets. To use this rate variation model, use option --rateVariation . We only recommend using this model with the UNREST substitution model (option --model UNREST).
+We have now also developed in MAPLE a model of rate variation, see De Maio et al 2024a [https://doi.org/10.1101/2024.07.12.603240](https://doi.org/10.1101/2024.07.12.603240). This model assigns a free rate parameter to each genome positions; since this model is parameter-rich, its use is recommended only for larger datasets. To use this rate variation model, use option --rateVariation . We only recommend using this model with the UNREST substitution model (option --model UNREST).
 
-Additionally, MAPLE includes a model of heterogeneous recurrent sequence errors, that can account for and estimate recurrent sequence errors (option --estimateSiteSpecificErrorRate). This model also assigns a free parameter (the error probability) to each genome positions; its use is recommended only for larger datasets and in conjunction with the rate variation model (option --rateVariation) and the UNREST substitution model (option --model UNREST).
+Additionally, MAPLE includes a model of heterogeneous recurrent sequence errors, that can account for and estimate recurrent sequence errors (option --estimateSiteSpecificErrorRate), see De Maio et al 2024a [https://doi.org/10.1101/2024.07.12.603240](https://doi.org/10.1101/2024.07.12.603240). This model also assigns a free parameter (the error probability) to each genome positions; its use is recommended only for larger datasets and in conjunction with the rate variation model (option --rateVariation) and the UNREST substitution model (option --model UNREST).
 
 In summary, to run the most advanced model in MAPLE, you can use options
 
     pypy3 MAPLEv0.6.8.py --input inputMapleFile.txt --output MAPLE_outputFile --model UNREST --rateVariation --estimateSiteSpecificErrorRate
 
 Further, when using the sequence error model in MAPLE, it is possible to estimate individual sequence errors in the input alignment with option --estimateErrors . An output file will then contain estimated sequence errors, each with its posterior probability of being an error.
+
+Note however that only part of the highly recurrent errors might be identified by MAPLE if the error rates are too high or correlated with one another. In these cases it might be better to first identify higly recurrent errors with MAPLE, then mask these columns from the alignment, then re-run MAPLE.
+It is also important to start inference from a high-quality alignment, and in particular we recommend using Viridian genomes as they prevent calling many wrong reversions to the reference, see Hunt et al. 2024 [https://doi.org/10.1101/2024.04.29.591666](https://doi.org/10.1101/2024.04.29.591666).
 
 
 ### Parallelization
