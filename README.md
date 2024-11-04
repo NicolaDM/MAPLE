@@ -65,7 +65,7 @@ It is also important to start inference from a high-quality alignment, and in pa
 ### Parallelization
 
 The most time-demanding part of MAPLE is the SPR search to improve the topology of the initial tree.
-SPR search can now be run in parallel in MAPLE using multiple cores using option --numCores . For example:
+SPR search can now be run in parallel in MAPLE using multiple cores using option --numCores , see De Maio et al 2024a [https://doi.org/10.1101/2024.07.12.603240](https://doi.org/10.1101/2024.07.12.603240) . For example:
 
     pypy3 MAPLEv0.6.8.py --input inputMapleFile.txt --output MAPLE_outputFile --numCores 10
 
@@ -81,7 +81,7 @@ Inferred mutations will be annotated with posterior probabilities, so that the s
 
 ### Branch support
 
-MAPLE can estimate branch support with a new pandemic-scale approach (SPRTA, manuscript in prep.) using option --SPRTA.
+MAPLE can estimate branch support with a new pandemic-scale approach (SPRTA, see De Maio et al. 2024b [https://doi.org/10.1101/2024.10.21.619398](https://doi.org/10.1101/2024.10.21.619398).) using option --SPRTA.
 MAPLE will then approximate the posterior probabilities of branches in the tree with positive length.
 Note that these are not intended as the posterior brobabilities of clades, but rather the posterior probabilities of branches intended as placements of ancestral genomes, which often can be interpreted as a support for the inferred genome evolution history.
 For example, MAPLE will also assign support values to terminal branches of the tree - these are interpreted as placement probabilities for the considered genome sequences.
@@ -89,6 +89,8 @@ For example, MAPLE will also assign support values to terminal branches of the t
 An advantage of the SPRTA approach in MAPLE is that its output can be interpreted as a phylogenetic network: for each tree branch we not only define a support score, but also a list of alternative placements for that branch (other branches in the tree where the considered ancestral genome might have evolved from), each with its own estimated support probability. This network-like output can be obtained with option --networkOutput , for example:
 
     pypy3 MAPLEv0.6.8.py --input inputMapleFile.txt --output MAPLE_outputFile --SPRTA --networkOutput
+
+Additionally, option --supportFor0Branches will make SPRTA evaluate the support of also branches of length 0, therefore evaluating the placement of all considered samples. This option will slow down the execution of SPRTA.
 
 Please note however that SPRTA is not compatible with parallelization, that is, it can so far only be run sequentially, it is not therefore possible to use options --SPRTA and --numCores in the same MAPLE run.
 
