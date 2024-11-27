@@ -95,6 +95,17 @@ Additionally, option --supportFor0Branches will make SPRTA evaluate the support 
 Please note however that SPRTA is not compatible with parallelization, that is, it can so far only be run sequentially, it is not therefore possible to use options --SPRTA and --numCores in the same MAPLE run.
 
 
+### Accounting for lineage abundance
+
+As of version 0.6.12 MAPLE can account for lineage abundance during phylogenetic inference. The idea is that, for example when placing a genome on a phylogeny, it is more likely that the genome is a copy (or a descendant) of an abundant lineage, than of a rare one.
+This is normally not accounted for in maximum likelihood phylogenetics. To achieve this, we have implemented two diferrent approaches collectively called HnZ (Horse not Zebra). 
+The first one (HnZ1, corresponding to option --HnZ 1 ) accounts for the number of bifurcating tree topologies embedded within a multifurcating tree, and multiplies the multifurcating tree likelihood by this number.
+The second approach (HnZ2, corresponding to option --HnZ 2 ) multiplies the phylogenetic tree likelihood by a sampling likelihood, representing the probability that genomes were sampled given their abundance (as inferred by the tree itself).
+In our simulations, these HnZ methods (and in particular HnZ1) improve substantially the accuracy of MAPLE on simulated SARS-CoV-2 data, but they also require longer runtime.
+A manuscript describing HnZ1 and HnZ2 is in preparation.
+
+
+
 ### Robinson-Foulds distance calculation
 
 MAPLE can also be used to perform fast Robinson-Foulds distance calculation (using the algorithm from Day 1985) instead of performing tree inference.
