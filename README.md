@@ -23,6 +23,8 @@ The main script ("MAPLEv...py") takes in input an alignment file in MAPLE format
 
 The --output option is used by MAPLE to name the output files: in this case the final output tree will be named "MAPLE_outputFilePrefix_tree.tree", the file containing the estimated model parameters will be "MAPLE_outputFilePrefix_subs.txt", and so on. You can us option --overwrite to overwrite existing files with those names.
 
+We provide in this repository a very small example input file "MAPLE_alignment_example.txt" which MAPLE should be able to analyse in just a few seconds to infer a phylogenetic tree and substitution rates (and possibly other outputs if other options are used).
+
 
 ### Creating an input MAPLE alignment file
 
