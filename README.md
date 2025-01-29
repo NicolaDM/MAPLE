@@ -116,7 +116,7 @@ This can be done by running:
     pypy3 MAPLEv0.3.6.py --inputTree inputTreeFile.tree --inputRFtrees otherInputTreeFiles.tree
 
 The tree contained in the file specified with option --inputTree will be compared to all the trees in the file specified with option --inputRFtrees.
-Having multiple trees in this second file is faster than running the script many times with 2 trees at the time.
+Having multiple trees in this second file is faster than running the script many times with 2 trees at the time, but you will need to specify option --multipleInputRFTrees to prevent MAPLE from only reading the first tree in the file.
 
 
 
