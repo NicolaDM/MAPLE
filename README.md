@@ -83,18 +83,27 @@ Inferred mutations will be annotated with posterior probabilities, so that the s
 
 ### Branch support
 
-MAPLE can estimate branch support with a new pandemic-scale approach (SPRTA, see De Maio et al. 2024b [https://doi.org/10.1101/2024.10.21.619398](https://doi.org/10.1101/2024.10.21.619398).) using option --SPRTA.
+MAPLE can estimate branch support with a new pandemic-scale approach (SPRTA, see De Maio et al. 2024b [https://doi.org/10.1101/2024.10.21.619398](https://doi.org/10.1101/2024.10.21.619398)) using option --SPRTA.
 MAPLE will then approximate the posterior probabilities of branches in the tree with positive length.
-Note that these are not intended as the posterior brobabilities of clades, but rather the posterior probabilities of branches intended as placements of ancestral genomes, which often can be interpreted as a support for the inferred genome evolution history.
-For example, MAPLE will also assign support values to terminal branches of the tree - these are interpreted as placement probabilities for the considered genome sequences.
+Note that these support scores are not intended as the posterior brobabilities of clades intended as sets of taxa, a typical for branch support methods like Felsenstein's bootstrap.
+Instead, SPRTA scores are intended as a measure of confidence in the placements of ancestral genomes, or similarly in the inferred genome evolution history.
+SPRTA scores are also assigned to terminal branches of the tree - these can be interpreted as placement probabilities for the corresponding genome sequences, similarly to pplacer [https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-11-538](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-11-538).
 
-An advantage of the SPRTA approach in MAPLE is that its output can be interpreted as a phylogenetic network: for each tree branch we not only define a support score, but also a list of alternative placements for that branch (other branches in the tree where the considered ancestral genome might have evolved from), each with its own estimated support probability. This network-like output can be obtained with option --networkOutput , for example:
+An advantage of the SPRTA approach in MAPLE is that its output can be interpreted as a phylogenetic network: for each tree branch we not only define a support score, but also a list of alternative placements (other branches or nodes in the tree the considered ancestral genome might have evolved from), each with its own estimated support probability. This network-like output can be obtained with option --networkOutput , for example:
 
-    pypy3 MAPLEv0.6.8.py --input inputMapleFile.txt --output MAPLE_outputFile --SPRTA --networkOutput
+    pypy3 MAPLEv0.6.11.py --input inputMapleFile.txt --output MAPLE_outputFile --SPRTA --networkOutput
 
-Additionally, option --supportFor0Branches will make SPRTA evaluate the support of also branches of length 0, therefore evaluating the placement of all considered samples. This option will slow down the execution of SPRTA.
+MAPLE will create a metadata .tsv output file containing SPRTA support scores (in the "support" column) as well as, for each branch A, the list of branches that A is a plausible placement locations of ("supportTo" column). This format is particularly useful for visualizing alternative placements in Taxonium [https://taxonium.org/](https://taxonium.org/).
+To do this, first create a json file to be used in Taxonium combining the MAPLE tree with the SPRTA metadata:
 
-Please note however that SPRTA is not compatible with parallelization, that is, it can so far only be run sequentially, it is not therefore possible to use options --SPRTA and --numCores in the same MAPLE run.
+     newick_to_taxonium -i MAPLE_outputFile_tree.tree -m MAPLE_outputFile_metaData.tsv -o Taxonium_inputFile.jsonl -c support,supportGroup,supportTo
+
+(other metadata columns like rootSupport and mutationsInf can also be included in the json file, as well as further metadata, if available, after being combined to the SPRTA metadata file).
+Then open the resulting .jsonl file in Taxonium. For any branch, one can then highlight alternative placements of that branch by searching for the branch name in the "supportTo" search field in Taxonium.
+
+Option --supportFor0Branches will make SPRTA also evaluate the support of 0-length branches, and therefore in particular the placement of all samples. Expect slightly longer runtime when using this option.
+
+At the moment SPRTA is not compatible with parallelization, it is not therefore possible to use options --SPRTA and --numCores in the same MAPLE run.
 
 
 ### Accounting for lineage abundance
