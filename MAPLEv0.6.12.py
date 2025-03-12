@@ -2115,8 +2115,8 @@ if lineageRefs != "":
 		raise Exception("exit")
 
 	# make sure users specify a tree
-	if (not os.path.isfile(inputNexusTree)) and (not os.path.isfile(inputTree)):
-		print("Input tree in newick format "+inputTree+" or nexus format "+inputNexusTree+" not found, quitting MAPLE lineage assignment. Use option --inputTree or --inputNexusTree to specify a valid input tree file.")
+	if (not os.path.isfile(inputTree)):
+		print("Input tree in newick format "+inputTree+" not found, quitting MAPLE lineage assignment. Use option --inputTree to specify a valid input tree file.")
 		raise Exception("exit")
 
 	# check if file exits
@@ -5746,7 +5746,7 @@ numMinorsFound=[0]
 #function to find the best node in the tree where to append the new sample; traverses the tree and tries to append the sample at each node and mid-branch nodes, 
 # but stops traversing when certain criteria are met.
 #TODO account for HnZ modifiers in placement search
-def findBestParentForNewSample(tree,root,diffs,sample,allowAddAsMinorSeq):
+def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnly):
 	up=tree.up
 	children=tree.children
 	probVectUpRight=tree.probVectUpRight
@@ -5773,7 +5773,7 @@ def findBestParentForNewSample(tree,root,diffs,sample,allowAddAsMinorSeq):
 		if comparison==1:
 			# if we only looking for placement, not allow to add the new sample as a minor sequence,
 			# return the "more-informative node"
-			if not allowAddAsMinorSeq:
+			if computePlacementSupportOnly:
 				# we should return the best upper branch length as False to allow going up to the top of the polytomy
 				# though in this case the selected node is root it makes no difference
 				# return root, 1.0, None, diffs
@@ -5813,7 +5813,7 @@ def findBestParentForNewSample(tree,root,diffs,sample,allowAddAsMinorSeq):
 			if comparison==1:
 				# if we only looking for placement, not allow to add the new sample as a minor sequence,
 				# return the "more-informative node"
-				if not allowAddAsMinorSeq:
+				if computePlacementSupportOnly:
 					# return t1, 1.0, None, diffs
 					# we should return the best upper branch length as False to allow going up to the top of the polytomy
 					return t1, 1.0, bestBranchLengths, diffs
@@ -8459,7 +8459,7 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData):
 		lineageRefData[lineageRefName]=None
 
 		# find the best placement for the lineage reference genome
-		bestNode , bestScore, bestBranchLengths, bestPassedVect = findBestParentForNewSample(tree, t1, newPartials, numSamples, allowAddAsMinorSeq=False)
+		bestNode , bestScore, bestBranchLengths, bestPassedVect = findBestParentForNewSample(tree, t1, newPartials, numSamples, computePlacementSupportOnly=True)
 
 		# finetune the placement position
 		if bestNode:
@@ -8700,7 +8700,7 @@ if not doNotPlaceNewSamples:
 			print(" EM to update parameters during initial placement terminated, time taken: "+str(time()-start))
 
 		start=time()
-		bestNode , bestScore, bestBranchLengths, bestPassedVect = findBestParentForNewSample(tree,t1,newPartials,numSamples,allowAddAsMinorSeq=True)
+		bestNode , bestScore, bestBranchLengths, bestPassedVect = findBestParentForNewSample(tree,t1,newPartials,numSamples,computePlacementSupportOnly=False)
 		timeFinding+=(time()-start)
 		if bestBranchLengths!=None:
 			start=time()
