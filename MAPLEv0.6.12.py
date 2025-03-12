@@ -229,7 +229,7 @@ minMutProb=args.minMutProb
 doNotImproveTopology=args.doNotImproveTopology
 keepInputIQtreeSupports=args.keepInputIQtreeSupports
 aBayesPlusOn=False
-if aBayesPlus:
+if aBayesPlus or lineageRefs != "":
 	import math
 
 warnedBLen=[False]
@@ -5873,9 +5873,13 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 		bestBranchLengths=(dist[bestNode]/2,dist[bestNode]/2,oneMutBLen)
 	bestScore=bestLKdiff
 	compensanteForBranchLengthChange=True
+	if computePlacementSupportOnly:
+		listOfProbableNodes=[]
+		listofLKcosts=[]
+		rootAlreadyConsidered=False
 	for nodePair in bestNodes:
 		score=nodePair[1]
-		if score>=bestLKdiff-thresholdLogLKoptimization:
+		if (score>=bestLKdiff-thresholdLogLKoptimization) or (computePlacementSupportOnly and score>=bestLKdiff-thresholdLogLKoptimizationTopology):
 			node=nodePair[0]
 			#optimize branch lengths of appendage
 			if node==children[up[node]][0]:
@@ -5925,7 +5929,55 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 				bestBranchLengths=(bestTopLength,bestBottomLength,bestAppendingLength)
 				bestDiffs=diffs
 
-	return bestNode, bestScore, bestBranchLengths, bestDiffs
+			if computePlacementSupportOnly:
+				t1 = node
+				#check that the placement location is effectively different from the original node
+				differentNode=True
+				#topNode=node
+				#if t1 == topNode:
+				#	differentNode = False
+				#if (not bestBottomLength):
+				#	while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
+				#		topNode = up[topNode]
+				#	if t1 == topNode:
+				#		differentNode = False
+				#if t1 == children[node][1 - child]:
+				#	differentNode = False
+				#check that placement is not redundant
+				if (not bestTopLength):
+					differentNode=False
+				if dist[t1]<=effectivelyNon0BLen:
+					differentNode=False
+				# check if this is a root placement
+				if (not rootAlreadyConsidered) and (not bestTopLength):
+					topNode=up[t1]
+					while (dist[topNode]<=effectivelyNon0BLen) and (up[topNode]!=None):
+						topNode=up[topNode]
+					if up[topNode]==None:
+						rootAlreadyConsidered=True
+						listofLKcosts.append(optimizedScore)
+						listOfProbableNodes.append(topNode)
+				elif differentNode: #add placement to the list of legit ones
+					listofLKcosts.append(optimizedScore)
+					listOfProbableNodes.append(t1)
+	if computePlacementSupportOnly:
+		# calculate support(s) of possible placements
+		totSupport=0
+		for i in range(len(listofLKcosts)):
+			listofLKcosts[i]=math.exp(listofLKcosts[i])
+			totSupport+=listofLKcosts[i]
+
+		possiblePlacements=[]
+		for i in range(len(listofLKcosts)):
+			listofLKcosts[i]=listofLKcosts[i]/totSupport
+		for i in range(len(listofLKcosts)):
+			if listofLKcosts[i]>=minBranchSupport:
+				possiblePlacements.append((listOfProbableNodes[i],listofLKcosts[i]))
+
+		# return possiblePlacements
+		return possiblePlacements
+	else:
+		return bestNode, bestScore, bestBranchLengths, bestDiffs
 
 
 # Change the genome lists of the node and edescendants after making the node reference. Also change nDesc of the ancestor nodes.
@@ -8438,8 +8490,8 @@ def tsvForNode(tree,node,name,featureList,namesInTree,identicalTo=""):
 
 # Find a placement for each lineage reference
 def seekPlacementOfLineageRefs(tree, t1, lineageRefData):
-	# create a map from a lineage to a node
-	tree.lineageNodeMap = {}
+	# create a map from a lineage to its possible placements
+	tree.lineagePlacements = {}
 	numSamples = 0
 	for lineageRefName in lineageRefData.keys():
 		# extract the partial of the lineage reference genome
@@ -8447,33 +8499,23 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData):
 		lineageRefData[lineageRefName]=None
 
 		# find the best placement for the lineage reference genome
-		bestNode , bestScore, bestBranchLengths, bestPassedVect = findBestParentForNewSample(tree, t1, newPartials, numSamples, computePlacementSupportOnly=True)
+		possiblePlacements = findBestParentForNewSample(tree, t1, newPartials, numSamples, computePlacementSupportOnly=True)
 
 		# finetune the placement position
-		if bestNode:
-			if bestBranchLengths:
-				selectedPlacement = bestNode
-				upBlength = bestBranchLengths[0]
-				downBlength = bestBranchLengths[1]
-				appendingBlength = bestBranchLengths[2]
-				# if the upper branch length = False (or zero),
-				# go up to the top of the polytomy
-				if not upBlength:
-					selectedPlacement = tree.up[bestNode]
-					while (not tree.dist[selectedPlacement]) and (tree.up[selectedPlacement] != None):
-						selectedPlacement = tree.up[selectedPlacement]
+		if len(possiblePlacements):
+			# sort possiblePlacements by placement's support descending
+			sortedPlacements = sorted(possiblePlacements, key=lambda x: x[1], reverse=True)
 
-				# append the lineage assignment into the selected node
-				tree.lineageAssignments[selectedPlacement].append((lineageRefName, downBlength, appendingBlength))
+			# extract the best placement (with the highest support)
+			selectedPlacement = sortedPlacements[0][0]
+			# append the lineage assignment into the selected node
+			tree.lineageAssignments[selectedPlacement].append(lineageRefName)
 
-				# update lineage-node mapping
-				tree.lineageNodeMap[lineageRefName] = selectedPlacement
+			# update the list of possible placements for this lineage
+			tree.lineagePlacements[lineageRefName] = sortedPlacements
 
-			else:
-				print("Something went wrong: bestBranchLengths is null")
-				raise Exception("exit")
 		else:
-			print("Something went wrong: bestNode is null")
+			print("Something went wrong: possiblePlacements is empty")
 			raise Exception("exit")
 
 		# update the progress
@@ -8481,23 +8523,13 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData):
 		if (numSamples % 1000) == 0:
 			print("Processed ", str(numSamples), " lineage reference genomes")
 
-	# finalize the best lineage assigment in cases multiple lineages were assigned to one node
-	# the best assignment is the one with the lowest distance (down branch length + appending branch length) to the selected node
+	# a node may be assigned multiple lineages
 	for node in range(len(tree.lineageAssignments)):
 		lineageAssignments = tree.lineageAssignments[node]
-		bestLineageAssignment = None
-		shortestDist = 0
 
-		# loop over all assignments for this node
-		# find the best lineage with the shortest distance
-		for lineageRefName, downBlength, appendingBlength in lineageAssignments:
-			if (not bestLineageAssignment) or ((downBlength + appendingBlength) < shortestDist):
-				shortestDist = downBlength + appendingBlength
-				bestLineageAssignment = lineageRefName
-
-		# assign the best lineage
-		if bestLineageAssignment:
-			tree.lineage[node] = bestLineageAssignment
+		# assign the list of lineages to this node
+		if len(lineageAssignments) > 0:
+			tree.lineage[node] = "/".join(lineageAssignments)
 
 	# return the tree with lineage assignments added
 	return tree
@@ -8597,12 +8629,16 @@ def outputLineageAssignments(outputFile, tree, root):
 
 	print(f"Output lineage assignments at {outputFile}_metaData_lineageAssignment.tsv.")
 
-	# write TSV mapping from lineage to node
-	file = open(outputFile + "_metaData_lineageToNode.tsv", "w")
-	lineageNodeMap = tree.lineageNodeMap
-	file.write("lineage\tplacement\n")
-	for key in lineageNodeMap:
-		file.write(key + "\t" + namesInTree[name[lineageNodeMap[key]]] + "\n")
+	# write TSV mapping from lineage to its possible placements
+	file = open(outputFile + "_metaData_lineagePlacements.tsv", "w")
+	lineagePlacements = tree.lineagePlacements
+	file.write("lineage\tplacements\n")
+	for key in lineagePlacements:
+		placementStrVec = []
+		for placement, support in lineagePlacements[key]:
+			placementStrVec.append(f"{namesInTree[name[placement]]}:{str(support)}")
+		placementStr = ";".join(placementStrVec)
+		file.write(key + "\t" + placementStr + "\n")
 
 	# close the output file
 	file.close()
