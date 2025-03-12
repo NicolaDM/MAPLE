@@ -8450,6 +8450,8 @@ def tsvForNode(tree,node,name,featureList,namesInTree,identicalTo=""):
 
 # Find a placement for each lineage reference
 def seekPlacementOfLineageRefs(tree, t1, lineageRefData):
+	# create a map from a lineage to a node
+	tree.lineageNodeMap = {}
 	numSamples = 0
 	for lineageRefName in lineageRefData.keys():
 		# extract the partial of the lineage reference genome
@@ -8475,6 +8477,9 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData):
 
 				# append the lineage assignment into the selected node
 				tree.lineageAssignments[selectedPlacement].append((lineageRefName, downBlength, appendingBlength))
+
+				# update lineage-node mapping
+				tree.lineageNodeMap[lineageRefName] = selectedPlacement
 
 			else:
 				print("Something went wrong: bestBranchLengths is null")
@@ -8603,6 +8608,18 @@ def outputLineageAssignments(outputFile, tree, root):
 	file.close()
 
 	print(f"Output lineage assignments at {outputFile}_metaData_lineageAssignment.tsv.")
+
+	# write TSV mapping from lineage to node
+	file = open(outputFile + "_metaData_lineageToNode.tsv", "w")
+	lineageNodeMap = tree.lineageNodeMap
+	file.write("lineage\tplacement\n")
+	for key in lineageNodeMap:
+		file.write(key + "\t" + namesInTree[name[lineageNodeMap[key]]] + "\n")
+
+	# close the output file
+	file.close()
+
+	print(f"Output a map from lineages to their placements at {outputFile}_metaData_lineageToNode.tsv.")
 	# ------------ end of write TSV file ------------------
 
 	# ------------ write Nexus treefile ------------------
