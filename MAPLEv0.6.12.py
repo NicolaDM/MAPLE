@@ -5770,15 +5770,8 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 			comparison=isMinorSequence(probVect[root],diffs,onlyFindIdentical=True)
 		else:
 			comparison=isMinorSequence(probVect[root],diffs)
-		if comparison==1:
-			# if we only looking for placement, not allow to add the new sample as a minor sequence,
-			# return the "more-informative node"
-			if computePlacementSupportOnly:
-				# we should return the best upper branch length as False to allow going up to the top of the polytomy
-				# though in this case the selected node is root it makes no difference
-				# return root, 1.0, None, diffs
-				return root, 1.0, bestBranchLengths, diffs
-
+		# if we need to compute the placement support only, we have to process further and can't add the new sample as a minor sequence
+		if comparison==1 and not computePlacementSupportOnly:
 			minorSequences[root].append(sample)
 			#TODO
 			if HnZ:
@@ -5810,13 +5803,8 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 				comparison=isMinorSequence(probVect[t1],diffs,onlyFindIdentical=True)
 			else:
 				comparison=isMinorSequence(probVect[t1],diffs)
-			if comparison==1:
-				# if we only looking for placement, not allow to add the new sample as a minor sequence,
-				# return the "more-informative node"
-				if computePlacementSupportOnly:
-					# return t1, 1.0, None, diffs
-					# we should return the best upper branch length as False to allow going up to the top of the polytomy
-					return t1, 1.0, bestBranchLengths, diffs
+			# if we need to compute the placement support only, we have to process further and can't add the new sample as a minor sequence
+			if comparison==1 and not computePlacementSupportOnly:
 				minorSequences[t1].append(sample)
 				#TODO
 				if HnZ:
