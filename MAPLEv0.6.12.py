@@ -5991,7 +5991,12 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 			if placement not in listOfProbableNodes:
 				listofLKcosts.append(redundantPlacements[placement])
 				listOfProbableNodes.append(placement)
-				
+
+		# make sure at least one best placement is selected
+		if len(listOfProbableNodes) == 0:
+			listofLKcosts.append(bestScore)
+			listOfProbableNodes.append(bestNode)
+			print("Debug: len(listOfProbableNodes) == 0")
 		# calculate support(s) of possible placements
 		totSupport=0
 		for i in range(len(listofLKcosts)):
