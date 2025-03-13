@@ -8518,50 +8518,62 @@ def tsvForNode(tree,node,name,featureList,namesInTree,identicalTo=""):
 	#stringList.append("\n")
 	return "".join(stringList)
 
-# Find a placement for one lineage reference
-def seekPlacementOfOneLineageRef(lineageRefName, tree, t1, lineageRefData):
-	# extract the partial of the lineage reference genome
-	newPartials = probVectTerminalNode(lineageRefData[lineageRefName], None, None)
+def process_chunk(job_id, start, end, lineageRefNames, tree, t1, lineageRefData):
+	chunk_output = []
+	numSamples = 0
+	totalSamples = end - start
+	# Process a chunk of tasks and return results
+	for lineageRefName in lineageRefNames[start:end]:
+		# extract the partial of the lineage reference genome
+		newPartials = probVectTerminalNode(lineageRefData[lineageRefName], None, None)
 
-	# find the best placement for the lineage reference genome
-	# numSamples is unused to temporarily set at 1
-	numSamples = 1
-	possiblePlacements = findBestParentForNewSample(tree, t1, newPartials, numSamples, computePlacementSupportOnly=True)
+		# find the best placement for the lineage reference genome
+		possiblePlacements = findBestParentForNewSample(tree, t1, newPartials, numSamples,
+														computePlacementSupportOnly=True)
 
-	# finetune the placement position
-	if len(possiblePlacements):
-		# sort possiblePlacements by placement's support descending
-		sortedPlacements = sorted(possiblePlacements, key=lambda x: x[1], reverse=True)
+		# finetune the placement position
+		if len(possiblePlacements):
+			# sort possiblePlacements by placement's support descending
+			sortedPlacements = sorted(possiblePlacements, key=lambda x: x[1], reverse=True)
 
-	else:
-		print(f"Something went wrong: possiblePlacements for {lineageRefName} is empty")
-		raise Exception("exit")
+		else:
+			print(f"Something went wrong: possiblePlacements for {lineageRefName} is empty")
+			raise Exception("exit")
 
-	return lineageRefName, sortedPlacements
+		chunk_output.append((lineageRefName, sortedPlacements))
 
-# Find placements for all lineage references
+		# update progress
+		numSamples += 1
+		if numSamples % 50 == 0 or numSamples == totalSamples:
+			print(f"JobID {job_id} processed {numSamples}/{totalSamples}")
+
+	return chunk_output
+
 def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
 	# create a map from a lineage to its possible placements
 	tree.lineagePlacements = {}
-	lineageRefNames = lineageRefData.keys()
+	lineageRefNames = list(lineageRefData.keys())
+	chunk_size = (len(lineageRefNames) + numCores - 1) // numCores  # Ensures rounding up
+	chunks = [(i, min(i + chunk_size, len(lineageRefNames))) for i in range(0, len(lineageRefNames), chunk_size)]
 
+	# Parallelize over chunks
 	results = Parallel(n_jobs=numCores)(
-		delayed(seekPlacementOfOneLineageRef)(lineageRefName, tree, t1, lineageRefData)
-		for lineageRefName in tqdm(lineageRefNames)
+		delayed(process_chunk)(job_id, start, end, lineageRefNames, tree, t1, lineageRefData) for job_id, (start, end) in enumerate(chunks)
 	)
 
-	for lineageRefName, sortedPlacements in results:
-		# delete lineage genome that is already processed
-		lineageRefData[lineageRefName] = None
+	for chunk_output in results:
+		for lineageRefName, sortedPlacements in chunk_output:
+			# delete lineage genome that is already processed
+			lineageRefData[lineageRefName] = None
 
-		# extract the best placement (with the highest support)
-		selectedPlacement = sortedPlacements[0][0]
+			# extract the best placement (with the highest support)
+			selectedPlacement = sortedPlacements[0][0]
 
-		# append the lineage assignment into the selected node
-		tree.lineageAssignments[selectedPlacement].append(lineageRefName)
+			# append the lineage assignment into the selected node
+			tree.lineageAssignments[selectedPlacement].append(lineageRefName)
 
-		# update the list of possible placements for this lineage
-		tree.lineagePlacements[lineageRefName] = sortedPlacements
+			# update the list of possible placements for this lineage
+			tree.lineagePlacements[lineageRefName] = sortedPlacements
 
 	# a node may be assigned multiple lineages
 	for node in range(len(tree.lineageAssignments)):
@@ -8571,7 +8583,6 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
 		if len(lineageAssignments) > 0:
 			tree.lineage[node] = "/".join(lineageAssignments)
 
-	# return the tree with lineage assignments added
 	return tree
 
 # Annotate nodes by their lineage assignments
