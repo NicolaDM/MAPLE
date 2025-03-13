@@ -5983,14 +5983,15 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 				elif differentNode: #add placement to the list of legit ones
 					listofLKcosts.append(optimizedScore)
 					listOfProbableNodes.append(t1)
-	# make sure all redundant Placements have been recorded in listOfProbableNodes by their corresponding placement
-	for placement in redundantPlacements:
-		# if the corresponding placement has NOT been recorded in listOfProbableNodes, add this placement
-		if placement not in listOfProbableNodes:
-			listofLKcosts.append(redundantPlacements[placement])
-			listOfProbableNodes.append(placement)
 
 	if computePlacementSupportOnly:
+		# make sure all redundant Placements have been recorded in listOfProbableNodes by their corresponding placement
+		for placement in redundantPlacements:
+			# if the corresponding placement has NOT been recorded in listOfProbableNodes, add this placement
+			if placement not in listOfProbableNodes:
+				listofLKcosts.append(redundantPlacements[placement])
+				listOfProbableNodes.append(placement)
+				
 		# calculate support(s) of possible placements
 		totSupport=0
 		for i in range(len(listofLKcosts)):
