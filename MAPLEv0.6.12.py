@@ -5,6 +5,9 @@ from time import time
 import os.path
 from operator import itemgetter
 
+from joblib import Parallel, delayed
+from tqdm import tqdm
+
 #©EMBL-European Bioinformatics Institute, 2021-2023
 #Developd by Nicola De Maio, with contributions from Myrthe Willemsen.
 
@@ -8488,40 +8491,50 @@ def tsvForNode(tree,node,name,featureList,namesInTree,identicalTo=""):
 	#stringList.append("\n")
 	return "".join(stringList)
 
-# Find a placement for each lineage reference
-def seekPlacementOfLineageRefs(tree, t1, lineageRefData):
+# Find a placement for one lineage reference
+def seekPlacementOfOneLineageRef(lineageRefName, tree, t1, lineageRefData):
+	# extract the partial of the lineage reference genome
+	newPartials = probVectTerminalNode(lineageRefData[lineageRefName], None, None)
+
+	# find the best placement for the lineage reference genome
+	# numSamples is unused to temporarily set at 1
+	numSamples = 1
+	possiblePlacements = findBestParentForNewSample(tree, t1, newPartials, numSamples, computePlacementSupportOnly=True)
+
+	# finetune the placement position
+	if len(possiblePlacements):
+		# sort possiblePlacements by placement's support descending
+		sortedPlacements = sorted(possiblePlacements, key=lambda x: x[1], reverse=True)
+
+	else:
+		print(f"Something went wrong: possiblePlacements for {lineageRefName} is empty")
+		raise Exception("exit")
+
+	return lineageRefName, sortedPlacements
+
+# Find placements for all lineage references
+def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
 	# create a map from a lineage to its possible placements
 	tree.lineagePlacements = {}
-	numSamples = 0
-	for lineageRefName in lineageRefData.keys():
-		# extract the partial of the lineage reference genome
-		newPartials=probVectTerminalNode(lineageRefData[lineageRefName],None,None)
-		lineageRefData[lineageRefName]=None
+	lineageRefNames = lineageRefData.keys()
 
-		# find the best placement for the lineage reference genome
-		possiblePlacements = findBestParentForNewSample(tree, t1, newPartials, numSamples, computePlacementSupportOnly=True)
+	results = Parallel(n_jobs=numCores)(
+		delayed(seekPlacementOfOneLineageRef)(lineageRefName, tree, t1, lineageRefData)
+		for lineageRefName in tqdm(lineageRefNames)
+	)
 
-		# finetune the placement position
-		if len(possiblePlacements):
-			# sort possiblePlacements by placement's support descending
-			sortedPlacements = sorted(possiblePlacements, key=lambda x: x[1], reverse=True)
+	for lineageRefName, sortedPlacements in results:
+		# delete lineage genome that is already processed
+		lineageRefData[lineageRefName] = None
 
-			# extract the best placement (with the highest support)
-			selectedPlacement = sortedPlacements[0][0]
-			# append the lineage assignment into the selected node
-			tree.lineageAssignments[selectedPlacement].append(lineageRefName)
+		# extract the best placement (with the highest support)
+		selectedPlacement = sortedPlacements[0][0]
 
-			# update the list of possible placements for this lineage
-			tree.lineagePlacements[lineageRefName] = sortedPlacements
+		# append the lineage assignment into the selected node
+		tree.lineageAssignments[selectedPlacement].append(lineageRefName)
 
-		else:
-			print("Something went wrong: possiblePlacements is empty")
-			raise Exception("exit")
-
-		# update the progress
-		numSamples += 1
-		if (numSamples % 1000) == 0:
-			print("Processed ", str(numSamples), " lineage reference genomes")
+		# update the list of possible placements for this lineage
+		tree.lineagePlacements[lineageRefName] = sortedPlacements
 
 	# a node may be assigned multiple lineages
 	for node in range(len(tree.lineageAssignments)):
@@ -8667,14 +8680,14 @@ def outputLineageAssignments(outputFile, tree, root):
 # Output: assignments of nodes (tip and internal nodes) to lineages
 # 1. find a placement for each lineage reference
 # 2. locate the subtree rooted at the placement of each lineage reference; assign all children of that subtree to that lineage
-def assignLineageByReferencePlacement(tree, t1, lineageRefData):
+def assignLineageByReferencePlacement(tree, t1, lineageRefData, numCores):
 	numNodes = len(tree.up)
 	tree.lineageAssignments = [[] for _ in range(numNodes)]
 	tree.lineage = [None] * numNodes
 	tree.lineages = [None] * numNodes # don't use but need to add to reuse other functions
 
 	# 1. Find a placement for each lineage reference
-	tree = seekPlacementOfLineageRefs(tree, t1, lineageRefData)
+	tree = seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores)
 
 	# 2. Annotate nodes by their lineage assignments
 	tree = annotateLineageAssignments(tree, t1)
@@ -8686,8 +8699,8 @@ def assignLineageByReferencePlacement(tree, t1, lineageRefData):
 	exit(0)
 
 # Process linage assignments by reference genomes
-if lineageRefs != "":
-	assignLineageByReferencePlacement(tree, t1, lineageRefData)
+if performLineageAssignmentByRefPlacement:
+	assignLineageByReferencePlacement(tree, t1, lineageRefData, numCores)
 
 #Place input samples to create an initial tree (or extend the input tree).
 timeFinding=0.0
