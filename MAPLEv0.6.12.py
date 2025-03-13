@@ -5880,6 +5880,7 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 		listOfProbableNodes=[]
 		listofLKcosts=[]
 		rootAlreadyConsidered=False
+		redundantPlacements = []
 	for nodePair in bestNodes:
 		score=nodePair[1]
 		if (score>=bestLKdiff-thresholdLogLKoptimization) or (computePlacementSupportOnly and score>=bestLKdiff-thresholdLogLKoptimizationTopology):
@@ -5947,8 +5948,10 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 				#if t1 == children[node][1 - child]:
 				#	differentNode = False
 				#check that placement is not redundant
+				# a placement at node X with bestTopLength = 0 could be presented by another placement at the parent of X with bestBottomLength = 0
 				if (not bestTopLength):
 					differentNode=False
+					redundantPlacements.append((t1, optimizedScore))
 				if dist[t1]<=effectivelyNon0BLen:
 					differentNode=False
 				# check if this is a root placement
@@ -5963,6 +5966,34 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 				elif differentNode: #add placement to the list of legit ones
 					listofLKcosts.append(optimizedScore)
 					listOfProbableNodes.append(t1)
+	# make sure all redundant Placements have been recorded in listOfProbableNodes by its corresponding placement
+	# a placement at node X with bestTopLength = 0 could be presented by another placement at the parent of X with bestBottomLength = 0
+	for placement, score in redundantPlacements:
+
+		# go to the top of the polytomy
+		topNode = placement
+		while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
+			topNode = up[topNode]
+
+		# go to the top of the polytomy of the parent node
+		if up[topNode] != None:
+			parentTopNode = up[topNode]
+			while (dist[parentTopNode] <= effectivelyNon0BLen) and (up[parentTopNode] != None):
+				parentTopNode = up[parentTopNode]
+
+			# check if the corresponding placement has been recorded in listOfProbableNodes
+			correspondinPlacementFound = False
+			for ext_placement in listOfProbableNodes:
+				# a placement at node X with bestTopLength = 0 could be presented by another placement at the parent of X with bestBottomLength = 0
+				if ext_placement == parentTopNode:
+					correspondinPlacementFound = True
+					break
+
+			# if the corresponding placement has NOT been recorded in listOfProbableNodes, add this placement
+			if not correspondinPlacementFound:
+				listofLKcosts.append(score)
+				listOfProbableNodes.append(parentTopNode)
+
 	if computePlacementSupportOnly:
 		# calculate support(s) of possible placements
 		totSupport=0
@@ -8656,7 +8687,7 @@ def outputLineageAssignments(outputFile, tree, root):
 	# close the output file
 	file.close()
 
-	print(f"Output a map from lineages to their placements at {outputFile}_metaData_lineageToNode.tsv.")
+	print(f"Output a map from lineages to their placements at {outputFile}_metaData_lineagePlacements.tsv.")
 	# ------------ end of write TSV file ------------------
 
 	# ------------ write Nexus treefile ------------------
