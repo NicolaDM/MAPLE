@@ -6,7 +6,6 @@ import os.path
 from operator import itemgetter
 
 from joblib import Parallel, delayed
-from tqdm import tqdm
 
 #©EMBL-European Bioinformatics Institute, 2021-2023
 #Developd by Nicola De Maio, with contributions from Myrthe Willemsen.
