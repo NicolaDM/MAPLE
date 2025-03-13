@@ -5880,7 +5880,7 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 		listOfProbableNodes=[]
 		listofLKcosts=[]
 		rootAlreadyConsidered=False
-		redundantPlacements = []
+		redundantPlacements = {}
 	for nodePair in bestNodes:
 		score=nodePair[1]
 		if (score>=bestLKdiff-thresholdLogLKoptimization) or (computePlacementSupportOnly and score>=bestLKdiff-thresholdLogLKoptimizationTopology):
@@ -5951,7 +5951,24 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 				# a placement at node X with bestTopLength = 0 could be presented by another placement at the parent of X with bestBottomLength = 0
 				if (not bestTopLength):
 					differentNode=False
-					redundantPlacements.append((t1, optimizedScore))
+					# record the redundant placements
+					# go to the top of the polytomy
+					topNode = t1
+					while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
+						topNode = up[topNode]
+					# go to the top of the polytomy of the parent node
+					if up[topNode] != None:
+						parentTopNode = up[topNode]
+						while (dist[parentTopNode] <= effectivelyNon0BLen) and (up[parentTopNode] != None):
+							parentTopNode = up[parentTopNode]
+						# add the new redundant placement into redundantPlacements
+						# Check if the new placement is already in the dictionary
+						if parentTopNode in redundantPlacements:
+							# Update the score with the maximum of the current score and the new score
+							redundantPlacements[parentTopNode] = max(redundantPlacements[parentTopNode], optimizedScore)
+						else:
+							# Add the new placement with the new score
+							redundantPlacements[parentTopNode] = optimizedScore
 				if dist[t1]<=effectivelyNon0BLen:
 					differentNode=False
 				# check if this is a root placement
@@ -5966,33 +5983,12 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 				elif differentNode: #add placement to the list of legit ones
 					listofLKcosts.append(optimizedScore)
 					listOfProbableNodes.append(t1)
-	# make sure all redundant Placements have been recorded in listOfProbableNodes by its corresponding placement
-	# a placement at node X with bestTopLength = 0 could be presented by another placement at the parent of X with bestBottomLength = 0
-	for placement, score in redundantPlacements:
-
-		# go to the top of the polytomy
-		topNode = placement
-		while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
-			topNode = up[topNode]
-
-		# go to the top of the polytomy of the parent node
-		if up[topNode] != None:
-			parentTopNode = up[topNode]
-			while (dist[parentTopNode] <= effectivelyNon0BLen) and (up[parentTopNode] != None):
-				parentTopNode = up[parentTopNode]
-
-			# check if the corresponding placement has been recorded in listOfProbableNodes
-			correspondinPlacementFound = False
-			for ext_placement in listOfProbableNodes:
-				# a placement at node X with bestTopLength = 0 could be presented by another placement at the parent of X with bestBottomLength = 0
-				if ext_placement == parentTopNode:
-					correspondinPlacementFound = True
-					break
-
-			# if the corresponding placement has NOT been recorded in listOfProbableNodes, add this placement
-			if not correspondinPlacementFound:
-				listofLKcosts.append(score)
-				listOfProbableNodes.append(parentTopNode)
+	# make sure all redundant Placements have been recorded in listOfProbableNodes by their corresponding placement
+	for placement in redundantPlacements:
+		# if the corresponding placement has NOT been recorded in listOfProbableNodes, add this placement
+		if placement not in listOfProbableNodes:
+			listofLKcosts.append(redundantPlacements[placement])
+			listOfProbableNodes.append(placement)
 
 	if computePlacementSupportOnly:
 		# calculate support(s) of possible placements
