@@ -8425,6 +8425,7 @@ if (numSamples>1) and (model!="JC" or ((numSamples>=minNumSamplesForRateVar) and
 	timeRecalculation=time()-start
 	print("Time to run initial tree EM estimation: "+str(timeRecalculation))
 
+# This function was moved upward to be used in Lineage Assignments by Lineage reference genomes
 #generate the string corresponding to a line of the tsv file for use in Taxonium.
 # If representative node is 0-dist, then its support is also the support of all represented nodes. If not, can we assume that the support of the represented nodes is 1.
 # Includes support of represented nodes only if supportFor0Branches is true, otherwise smpty string.
@@ -8523,6 +8524,7 @@ def tsvForNode(tree,node,name,featureList,namesInTree,identicalTo=""):
 	#stringList.append("\n")
 	return "".join(stringList)
 
+# seek placements for a chunk that contains a subset of lineage reference genomes
 def process_chunk(job_id, start, end, lineageRefNames, tree, t1, lineageRefData):
 	chunk_output = []
 	numSamples = 0
@@ -8554,6 +8556,7 @@ def process_chunk(job_id, start, end, lineageRefNames, tree, t1, lineageRefData)
 
 	return chunk_output
 
+# seek placements for lineage reference genomes
 def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
 	# create a map from a lineage to its possible placements
 	tree.lineagePlacements = {}
