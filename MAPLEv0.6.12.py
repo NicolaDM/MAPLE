@@ -5785,7 +5785,7 @@ def processRedundantPlacements(tree, redundantPlacements, listOfProbableNodes, l
 	# listOfCorrespondingPlacements records the corresponding placements
 	# if bestTopLength != 0, corresponding placement at node X = node X
 	# if  bestTopLength == 0, corresponding placement at node X = parent of X
-	listOfCorrespondingPlacements = listOfProbableNodes
+	listOfCorrespondingPlacements = listOfProbableNodes.copy()
 	for parent, original_node, optimizedScore, blengths in redundantPlacements:
 		# only consider placement whose parent is not None
 		if parent:
