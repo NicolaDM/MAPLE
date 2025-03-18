@@ -5747,12 +5747,12 @@ def findBestRoot(tree,root,strictTopologyStopRules=strictTopologyStopRules,allow
 numMinorsFound=[0]
 # check if redundant placements are really redundant,
 # if not (~the corresponding placement at the parent node has not been recorded), add that placement to compute SPRTA
-def processRedundantPlacements(tree, redundantPlacements, listOfProbableNodes, listofLKcosts):
+def processRedundantPlacements(tree, redundantPlacements, listOfProbableNodes, listofLKcosts, listOfOptBlengths):
 	dist = tree.dist
 	up = tree.up
 	# record the parent node of each redundant placement to check if they are really redundant
 	for i in range(len(redundantPlacements)):
-		tmp_parent, original_node, optimizedScore = redundantPlacements[i]
+		tmp_parent, original_node, optimizedScore, blengths = redundantPlacements[i]
 		# go to the top of the polytomy
 		topNode = original_node
 		while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
@@ -5776,25 +5776,33 @@ def processRedundantPlacements(tree, redundantPlacements, listOfProbableNodes, l
 					redundantPlacements[j][0] = None
 
 	# Loop over the list of redundantPlacements, if its corresponding placement has not been recorded in listOfProbableNodes, add it
-	for parent, original_node, optimizedScore in redundantPlacements:
+	# listOfCorrespondingPlacements records the corresponding placements
+	# if bestTopLength != 0, corresponding placement at node X = node X
+	# if  bestTopLength == 0, corresponding placement at node X = parent of X
+	listOfCorrespondingPlacements = listOfProbableNodes
+	for parent, original_node, optimizedScore, blengths in redundantPlacements:
 		# only consider placement whose parent is not None
 		if parent:
-			# check if the corresponding placement has not been recorded in listOfProbableNodes
+			# check if the corresponding placement has not been recorded in listOfCorrespondingPlacements
 			i = 0
-			for i in range(len(listOfProbableNodes)):
-				if listOfProbableNodes[i] == parent:
+			for i in range(len(listOfCorrespondingPlacements)):
+				if listOfCorrespondingPlacements[i] == parent:
 					break
 
-			# if the corresponding placement has been recorded in listOfProbableNodes, update the best score
-			if i < len(listOfProbableNodes):
+			# if the corresponding placement has been recorded in listOfCorrespondingPlacements, update the best score
+			if i < len(listOfCorrespondingPlacements):
 				if listofLKcosts[i] < optimizedScore:
 					listofLKcosts[i] = optimizedScore
+					listOfOptBlengths[i] = blengths
+					listOfProbableNodes[i] = original_node
 			# otherwise, if the corresponding placement has NOT been recorded in listOfProbableNodes, add this placement
 			else:
 				listofLKcosts.append(optimizedScore)
 				listOfProbableNodes.append(original_node)
+				listOfOptBlengths.append(blengths)
+				listOfCorrespondingPlacements.append(parent)
 
-	return listOfProbableNodes, listofLKcosts
+	return listOfProbableNodes, listofLKcosts, listOfOptBlengths
 
 #function to find the best node in the tree where to append the new sample; traverses the tree and tries to append the sample at each node and mid-branch nodes, 
 # but stops traversing when certain criteria are met.
@@ -5931,6 +5939,7 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 		listofLKcosts=[]
 		rootAlreadyConsidered=False
 		redundantPlacements = []
+		listOfOptBlengths = []
 	for nodePair in bestNodes:
 		score=nodePair[1]
 		if (score>=bestLKdiff-thresholdLogLKoptimization) or (computePlacementSupportOnly and score>=bestLKdiff-thresholdLogLKoptimizationTopology):
@@ -6004,7 +6013,7 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 				if (not bestTopLength):
 					differentNode=False
 					# record the redundant placements for processing later
-					redundantPlacements.append([None, t1, optimizedScore])
+					redundantPlacements.append([None, t1, optimizedScore, (bestTopLength,bestBottomLength,bestAppendingLength)])
 				if dist[t1]<=effectivelyNon0BLen:
 					differentNode=False
 				# check if this is a root placement
@@ -6016,12 +6025,14 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 						rootAlreadyConsidered=True
 						listofLKcosts.append(optimizedScore)
 						listOfProbableNodes.append(topNode)
+						listOfOptBlengths.append((bestTopLength,bestBottomLength,bestAppendingLength))
 				elif differentNode: #add placement to the list of legit ones
 					listofLKcosts.append(optimizedScore)
 					listOfProbableNodes.append(t1)
+					listOfOptBlengths.append((bestTopLength, bestBottomLength, bestAppendingLength))
 
 	if computePlacementSupportOnly:
-		listOfProbableNodes, listofLKcosts = processRedundantPlacements(tree, redundantPlacements, listOfProbableNodes, listofLKcosts)
+		listOfProbableNodes, listofLKcosts, listOfOptBlengths = processRedundantPlacements(tree, redundantPlacements, listOfProbableNodes, listofLKcosts, listOfOptBlengths)
 
 		# calculate support(s) of possible placements
 		totSupport=0
@@ -6034,7 +6045,7 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 			listofLKcosts[i]=listofLKcosts[i]/totSupport
 		for i in range(len(listofLKcosts)):
 			if listofLKcosts[i]>=minBranchSupport:
-				possiblePlacements.append((listOfProbableNodes[i],listofLKcosts[i]))
+				possiblePlacements.append((listOfProbableNodes[i],listofLKcosts[i],listOfOptBlengths[i]))
 
 		# return possiblePlacements
 		return possiblePlacements
@@ -8718,13 +8729,23 @@ def outputLineageAssignments(outputFile, tree, root):
 	# write TSV mapping from lineage to its possible placements
 	file = open(outputFile + "_metaData_lineagePlacements.tsv", "w")
 	lineagePlacements = tree.lineagePlacements
-	file.write("lineage\tplacements\n")
+	file.write("lineage\tplacements\optimizedBlengths\n")
 	for key in lineagePlacements:
 		placementStrVec = []
-		for placement, support in lineagePlacements[key]:
+		placementBlengthsVec = []
+		for placement, support, optimizedBlengths in lineagePlacements[key]:
 			placementStrVec.append(f"{namesInTree[name[placement]]}:{str(support)}")
+			blengthsVec = []
+			for blength in optimizedBlengths:
+				if blength:
+					blengthsVec.append(str(blength))
+				else:
+					blengthsVec.append("0")
+			blengthsStr = "/".join(blengthsVec)
+			placementBlengthsVec.append(f"{namesInTree[name[placement]]}:({blengthsStr})")
 		placementStr = ";".join(placementStrVec)
-		file.write(key + "\t" + placementStr + "\n")
+		placementBlengthsStr = ";".join(placementBlengthsVec)
+		file.write(key + "\t" + placementStr + "\t" + placementBlengthsStr + "\n")
 
 	# close the output file
 	file.close()
