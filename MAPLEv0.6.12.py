@@ -85,6 +85,7 @@ parser.add_argument('--inputNexusTree',default="", help='input nexus tree file n
 parser.add_argument('--reRoot',default="", help='Re-root the input newick tree so that the specified sample/lineage is root. By default, no specified lineage/sample, so no rerooting.')
 #lineage assignment from reference genomes which are not in the tree yet
 parser.add_argument('--lineageRefs',default="", help='give path and name to an alignment file (in MAPLE format) containing reference genomes, each represents one lineage. When using this option, option --inputTree should also be used. Then MAPLE will find the best placement for each lineage reference. Each sample is assigned a lineage same as its closest reference parent.')
+parser.add_argument('--lineageRefsThresh',default=1.0, help='The threshold (in term of #mutation) to check whether a reference lineage genome could be considered as the parent of a subtree. Default: 1 mutation', type = float)
 #rarer options
 parser.add_argument("--defaultBLen",help="Default length of branches, for example when the input tree has no branch length information.",  type=float, default=0.000033)
 parser.add_argument("--normalizeInputBLen",help="For the case the input tree has branch lengths expressed not in a likelihood fashion (that is, expected number of substitutions per site), then multiply the input branch lengths by this factor. Particularly useful when using parsimony-based input trees.",  type=float, default=1.0)
@@ -122,6 +123,7 @@ inputFile=args.input
 outputFile=args.output
 refFile=args.reference
 lineageRefs=args.lineageRefs
+lineageRefsThresh = args.lineageRefsThresh
 allowedFails=args.allowedFails
 allowedFailsTopology=args.allowedFailsTopology
 model=args.model
@@ -2155,6 +2157,7 @@ thresholdLogLKtopology*=logLRef
 thresholdLogLK*=logLRef
 thresholdLogLKtopologyInitial*=logLRef
 effectivelyNon0BLen=1.0/(10*lRef)
+lineageRefsThresh /= lRef
 	
 minimumCarryOver=sys.float_info.min*(1e50)
 
@@ -8614,9 +8617,11 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
 
 			# extract the best placement (with the highest support)
 			selectedPlacement = sortedPlacements[0][0]
+			topBlength, bottomBlength, appendingBlength = sortedPlacements[0][2]
 
 			# append the lineage assignment into the selected node
-			tree.lineageAssignments[selectedPlacement].append(lineageRefName)
+			if appendingBlength <= lineageRefsThresh:
+				tree.lineageAssignments[selectedPlacement].append(lineageRefName)
 
 			# update the list of possible placements for this lineage
 			tree.lineagePlacements[lineageRefName] = sortedPlacements
@@ -8729,10 +8734,12 @@ def outputLineageAssignments(outputFile, tree, root):
 	# write TSV mapping from lineage to its possible placements
 	file = open(outputFile + "_metaData_lineagePlacements.tsv", "w")
 	lineagePlacements = tree.lineagePlacements
-	file.write("lineage\tplacements\optimizedBlengths\n")
+	file.write("lineage\tplacements\optimizedBlengths\tisAncestralOfSubtree\n")
 	for key in lineagePlacements:
 		placementStrVec = []
 		placementBlengthsVec = []
+		isAncestralOfSubtree = False
+		isBestPlacement = True
 		for placement, support, optimizedBlengths in lineagePlacements[key]:
 			placementStrVec.append(f"{namesInTree[name[placement]]}:{str(support)}")
 			blengthsVec = []
@@ -8743,9 +8750,15 @@ def outputLineageAssignments(outputFile, tree, root):
 					blengthsVec.append("0")
 			blengthsStr = "/".join(blengthsVec)
 			placementBlengthsVec.append(f"{namesInTree[name[placement]]}:({blengthsStr})")
+			# check if this lineage could be considered as the ancestral of a subtree rooted at its best placement
+			if isBestPlacement and optimizedBlengths[2] <= lineageRefsThresh:
+				isAncestralOfSubtree = True
+
+			isBestPlacement = False
+
 		placementStr = ";".join(placementStrVec)
 		placementBlengthsStr = ";".join(placementBlengthsVec)
-		file.write(key + "\t" + placementStr + "\t" + placementBlengthsStr + "\n")
+		file.write(key + "\t" + placementStr + "\t" + placementBlengthsStr + "\t" + str(isAncestralOfSubtree) + "\n")
 
 	# close the output file
 	file.close()
