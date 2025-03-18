@@ -8599,6 +8599,8 @@ def process_chunk(job_id, start, end, lineageRefNames, tree, t1, lineageRefData)
 
 # seek placements for lineage reference genomes
 def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
+	dist = tree.dist
+	up = tree.up
 	# create a map from a lineage to its possible placements
 	tree.lineagePlacements = {}
 	lineageRefNames = list(lineageRefData.keys())
@@ -8620,11 +8622,18 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
 			topBlength, bottomBlength, appendingBlength = sortedPlacements[0][2]
 
 			# append the lineage assignment into the selected node
+			lineageRootPosition = None
 			if appendingBlength <= lineageRefsThresh:
+				if not topBlength and up[selectedPlacement]:
+					selectedPlacement = up[selectedPlacement]
+					# traverse upward to the top of the polytomy
+					while (dist[selectedPlacement] <= effectivelyNon0BLen) and (up[selectedPlacement] != None):
+						selectedPlacement = up[selectedPlacement]
 				tree.lineageAssignments[selectedPlacement].append(lineageRefName)
+				lineageRootPosition = selectedPlacement
 
 			# update the list of possible placements for this lineage
-			tree.lineagePlacements[lineageRefName] = sortedPlacements
+			tree.lineagePlacements[lineageRefName] = (sortedPlacements, lineageRootPosition)
 
 	# a node may be assigned multiple lineages
 	for node in range(len(tree.lineageAssignments)):
@@ -8734,13 +8743,12 @@ def outputLineageAssignments(outputFile, tree, root):
 	# write TSV mapping from lineage to its possible placements
 	file = open(outputFile + "_metaData_lineagePlacements.tsv", "w")
 	lineagePlacements = tree.lineagePlacements
-	file.write("lineage\tplacements\optimizedBlengths\tisAncestralOfSubtree\n")
+	file.write("lineage\tplacements\optimizedBlengths\tlineageRootPosition\n")
 	for key in lineagePlacements:
 		placementStrVec = []
 		placementBlengthsVec = []
-		isAncestralOfSubtree = False
-		isBestPlacement = True
-		for placement, support, optimizedBlengths in lineagePlacements[key]:
+		plausiblePlacements, lineageRootPosition = lineagePlacements[key]
+		for placement, support, optimizedBlengths in plausiblePlacements:
 			placementStrVec.append(f"{namesInTree[name[placement]]}:{str(support)}")
 			blengthsVec = []
 			for blength in optimizedBlengths:
@@ -8750,15 +8758,15 @@ def outputLineageAssignments(outputFile, tree, root):
 					blengthsVec.append("0")
 			blengthsStr = "/".join(blengthsVec)
 			placementBlengthsVec.append(f"{namesInTree[name[placement]]}:({blengthsStr})")
-			# check if this lineage could be considered as the ancestral of a subtree rooted at its best placement
-			if isBestPlacement and optimizedBlengths[2] <= lineageRefsThresh:
-				isAncestralOfSubtree = True
 
-			isBestPlacement = False
+		# extract the root position of the lineage (if the current lineage is considered as an ancestral of a subtree)
+		lineageRootPositionStr = "None"
+		if lineageRootPosition:
+			lineageRootPositionStr = namesInTree[name[lineageRootPosition]]
 
 		placementStr = ";".join(placementStrVec)
 		placementBlengthsStr = ";".join(placementBlengthsVec)
-		file.write(key + "\t" + placementStr + "\t" + placementBlengthsStr + "\t" + str(isAncestralOfSubtree) + "\n")
+		file.write(key + "\t" + placementStr + "\t" + placementBlengthsStr + "\t" + lineageRootPositionStr + "\n")
 
 	# close the output file
 	file.close()
