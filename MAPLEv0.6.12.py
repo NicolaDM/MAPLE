@@ -8758,7 +8758,7 @@ def outputLineageAssignments(outputFile, tree, root):
 	# write TSV mapping from lineage to its possible placements
 	file = open(outputFile + "_metaData_lineagePlacements.tsv", "w")
 	lineagePlacements = tree.lineagePlacements
-	file.write("lineage\tplacements\optimizedBlengths\tlineageRootPosition\n")
+	file.write("lineage\tplacements\toptimizedBlengths\tlineageRootPosition\n")
 	for key in lineagePlacements:
 		placementStrVec = []
 		placementBlengthsVec = []
