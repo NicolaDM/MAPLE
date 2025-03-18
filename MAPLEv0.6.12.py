@@ -86,6 +86,8 @@ parser.add_argument('--reRoot',default="", help='Re-root the input newick tree s
 #lineage assignment from reference genomes which are not in the tree yet
 parser.add_argument('--lineageRefs',default="", help='give path and name to an alignment file (in MAPLE format) containing reference genomes, each represents one lineage. When using this option, option --inputTree should also be used. Then MAPLE will find the best placement for each lineage reference. Each sample is assigned a lineage same as its closest reference parent.')
 parser.add_argument('--lineageRefsThresh',default=1.0, help='The threshold (in term of #mutation) to check whether a reference lineage genome could be considered as the parent of a subtree. Default: 1 mutation', type = float)
+parser.add_argument('--allowMultiLineagesPerNode', help='When a node is selected as the best placements for multiple lineages, whether we allow assigning all of these lineages (or only the closest lineage) to the subtree. Default: assigning the closet lineage', action="store_true")
+
 #rarer options
 parser.add_argument("--defaultBLen",help="Default length of branches, for example when the input tree has no branch length information.",  type=float, default=0.000033)
 parser.add_argument("--normalizeInputBLen",help="For the case the input tree has branch lengths expressed not in a likelihood fashion (that is, expected number of substitutions per site), then multiply the input branch lengths by this factor. Particularly useful when using parsimony-based input trees.",  type=float, default=1.0)
@@ -124,6 +126,7 @@ outputFile=args.output
 refFile=args.reference
 lineageRefs=args.lineageRefs
 lineageRefsThresh = args.lineageRefsThresh
+allowMultiLineagesPerNode = args.allowMultiLineagesPerNode
 allowedFails=args.allowedFails
 allowedFailsTopology=args.allowedFailsTopology
 model=args.model
@@ -8629,7 +8632,7 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
 					# traverse upward to the top of the polytomy
 					while (dist[selectedPlacement] <= effectivelyNon0BLen) and (up[selectedPlacement] != None):
 						selectedPlacement = up[selectedPlacement]
-				tree.lineageAssignments[selectedPlacement].append(lineageRefName)
+				tree.lineageAssignments[selectedPlacement].append([lineageRefName, bottomBlength])
 				lineageRootPosition = selectedPlacement
 
 			# update the list of possible placements for this lineage
@@ -8641,7 +8644,19 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
 
 		# assign the list of lineages to this node
 		if len(lineageAssignments) > 0:
-			tree.lineage[node] = "/".join(lineageAssignments)
+			# when a node is descendant of multiple references,
+			# assign all these lineages to this node
+			if allowMultiLineagesPerNode:
+				tree.lineage[node] = "/".join(lineageRefName for lineageRefName, _ in lineageAssignments)
+			# otherwise, we assign the phylogenetically closest one to it
+			else:
+				closestLineage = lineageAssignments[0][0]
+				closetDistance = lineageAssignments[0][1]
+				for i in range(1, len(lineageAssignments)):
+					if lineageAssignments[i][1] < closetDistance:
+						closestLineage = lineageAssignments[i][0]
+						closetDistance = lineageAssignments[i][1]
+				tree.lineage[node] = closestLineage
 
 	return tree
 
