@@ -8775,7 +8775,7 @@ def outputLineageAssignments(outputFile, tree, root):
 			placementBlengthsVec.append(f"{namesInTree[name[placement]]}:({blengthsStr})")
 
 		# extract the root position of the lineage (if the current lineage is considered as an ancestral of a subtree)
-		lineageRootPositionStr = "None"
+		lineageRootPositionStr = "-"
 		if lineageRootPosition != None:
 			lineageRootPositionStr = namesInTree[name[lineageRootPosition]]
 
