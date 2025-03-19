@@ -8776,7 +8776,7 @@ def outputLineageAssignments(outputFile, tree, root):
 
 		# extract the root position of the lineage (if the current lineage is considered as an ancestral of a subtree)
 		lineageRootPositionStr = "None"
-		if lineageRootPosition:
+		if lineageRootPosition != None:
 			lineageRootPositionStr = namesInTree[name[lineageRootPosition]]
 
 		placementStr = ";".join(placementStrVec)
