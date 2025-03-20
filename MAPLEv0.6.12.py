@@ -5800,11 +5800,13 @@ def processRedundantPlacements(tree, redundantPlacements, listOfProbableNodes, l
 				if listofLKcosts[i] < optimizedScore:
 					listofLKcosts[i] = optimizedScore
 					listOfOptBlengths[i] = blengths
-					listOfProbableNodes[i] = original_node
+					listOfProbableNodes[i] = parent
+					#listOfProbableNodes[i] = original_node
 			# otherwise, if the corresponding placement has NOT been recorded in listOfProbableNodes, add this placement
 			else:
 				listofLKcosts.append(optimizedScore)
-				listOfProbableNodes.append(original_node)
+				listOfProbableNodes.append(parent)
+				#listOfProbableNodes.append(original_node)
 				listOfOptBlengths.append(blengths)
 				listOfCorrespondingPlacements.append(parent)
 
@@ -8634,11 +8636,12 @@ def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
 			# append the lineage assignment into the selected node
 			lineageRootPosition = None
 			if appendingBlength <= lineageRefsThresh:
-				if not topBlength and up[selectedPlacement]:
-					selectedPlacement = up[selectedPlacement]
+				# if topBlength == 0, we already record the parent instead of the original placement, so no further processing needed
+				#if not topBlength and up[selectedPlacement]:
+				#	selectedPlacement = up[selectedPlacement]
 					# traverse upward to the top of the polytomy
-					while (dist[selectedPlacement] <= effectivelyNon0BLen) and (up[selectedPlacement] != None):
-						selectedPlacement = up[selectedPlacement]
+				#	while (dist[selectedPlacement] <= effectivelyNon0BLen) and (up[selectedPlacement] != None):
+				#		selectedPlacement = up[selectedPlacement]
 				tree.lineageAssignments[selectedPlacement].append([lineageRefName, bottomBlength])
 				lineageRootPosition = selectedPlacement
 
