@@ -8503,6 +8503,13 @@ def tsvForNode(tree,node,name,featureList,namesInTree,identicalTo=""):
 						stringList.append(namesInTree[tree.name[feature[node][iNode][0]]]+":"+str(feature[node][iNode][1]))
 						if iNode<(len(feature[node])-1):
 							stringList.append(",")
+				# use this column to highlight which lineages could be placed (with probability above threshold) on the branch above the current node - used to highlight alternative placements of a given lineage on the tree.
+				elif feat == "supportToLineages" and identicalTo == "":
+					for iNode in range(len(feature[node])):
+						stringList.append(feature[node][iNode][0] + ":" + str(
+							feature[node][iNode][1]))
+						if iNode < (len(feature[node]) - 1):
+							stringList.append(";")
 				# elif feat=="alternativePlacements":
 				# 	for iNode in range(len(feature[node])):
 				# 		stringList.append(namesInTree[tree.name[feature[node][iNode][0]]]+":"+str(feature[node][iNode][1]))
@@ -8692,8 +8699,22 @@ def annotateLineageAssignments(tree, root):
 	# return the updated tree
 	return tree
 
+def defineSupportedToLineages(tree):
+	# init supportToLineages
+	numNodes = len(tree.up)
+	tree.supportToLineages = [[] for _ in range(numNodes)]
+	lineagePlacements = tree.lineagePlacements
+	for key in lineagePlacements:
+		plausiblePlacements, lineageRootPosition = lineagePlacements[key]
+		for placement, support, optimizedBlengths in plausiblePlacements:
+			topBlength, bottomBlength, appendingBlength = optimizedBlengths
+			if appendingBlength <= lineageRefsThresh:
+				tree.supportToLineages[placement].append([key, support])
+	return tree
+
 # Write lineage assignments to output file
 def outputLineageAssignments(outputFile, tree, root):
+	tree = defineSupportedToLineages(tree)
 	# ------------ write TSV file ------------------
 	giveInternalNodeNames(tree, t1, namesInTree=namesInTree, replaceNames=False)
 	file = open(outputFile + "_metaData_lineageAssignment.tsv", "w")
@@ -8704,6 +8725,7 @@ def outputLineageAssignments(outputFile, tree, root):
 	minorSequences = tree.minorSequences
 	featureNames = {}
 	featureNames['lineage'] = 'lineage'
+	featureNames['supportToLineages'] = 'supportToLineages'
 	featureList = list(featureNames.keys())
 	file.write("strain" + "\t" + "collapsedTo")
 	for feat in featureList:
