@@ -8824,9 +8824,16 @@ def outputLineageAssignments(outputFile, tree, root):
 	file.write(newickString)
 	file.write("\nend;\n")
 	file.close()
-	print(f"Output nexus tree with lineage assignments at {outputFile}_lineageAssignment.tree.")
+	print(f"Output Nexus tree with lineage assignments at {outputFile}_lineageAssignment.tree.")
 	# ------------ end of write Nexus treefile ------------------
 
+	# ------------ write Newick treefile ------------------
+	newickString = createNewick(tree, root, binary=binaryTree, namesInTree=namesInTree, estimateMAT=False, networkOutput=False, aBayesPlusOn=False)
+	file = open(outputFile + "_adjustedBlengths.tree", "w")
+	file.write(newickString)
+	file.close()
+	print(f"Output Newick tree with updated branch lengths at {outputFile}_updatedBlengths.tree.")
+	# ------------ end of write Newick treefile ------------------
 	# return success
 	return tree
 
