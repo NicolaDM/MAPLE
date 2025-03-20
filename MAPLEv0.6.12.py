@@ -8829,7 +8829,7 @@ def outputLineageAssignments(outputFile, tree, root):
 
 	# ------------ write Newick treefile ------------------
 	newickString = createNewick(tree, root, binary=binaryTree, namesInTree=namesInTree, estimateMAT=False, networkOutput=False, aBayesPlusOn=False)
-	file = open(outputFile + "_adjustedBlengths.tree", "w")
+	file = open(outputFile + "_updatedBlengths.tree", "w")
 	file.write(newickString)
 	file.close()
 	print(f"Output Newick tree with updated branch lengths at {outputFile}_updatedBlengths.tree.")
