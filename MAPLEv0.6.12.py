@@ -5751,66 +5751,6 @@ def findBestRoot(tree,root,strictTopologyStopRules=strictTopologyStopRules,allow
 
 
 numMinorsFound=[0]
-# check if redundant placements are really redundant,
-# if not (~the corresponding placement at the parent node has not been recorded), add that placement to compute SPRTA
-def processRedundantPlacements(tree, redundantPlacements, listOfProbableNodes, listofLKcosts, listOfOptBlengths):
-	dist = tree.dist
-	up = tree.up
-	# record the parent node of each redundant placement to check if they are really redundant
-	for i in range(len(redundantPlacements)):
-		tmp_parent, original_node, optimizedScore, blengths = redundantPlacements[i]
-		# go to the top of the polytomy
-		topNode = original_node
-		while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
-			topNode = up[topNode]
-		# go to the top of the polytomy of the parent node
-		parentTopNode = None
-		if up[topNode] != None:
-			parentTopNode = up[topNode]
-			while (dist[parentTopNode] <= effectivelyNon0BLen) and (up[parentTopNode] != None):
-				parentTopNode = up[parentTopNode]
-		# record the parentTopNode
-		redundantPlacements[i][0] = parentTopNode
-
-	# Loop over the list of redundantPlacements, keep only one placement with the highest score among all placements that has the same parent
-	for i in range(len(redundantPlacements)):
-		for j in range(i + 1, len(redundantPlacements)):
-			if redundantPlacements[i][0] == redundantPlacements[j][0] and redundantPlacements[i][0]:
-				if redundantPlacements[i][2] < redundantPlacements[j][2]:
-					redundantPlacements[i][0] = None
-				else:
-					redundantPlacements[j][0] = None
-
-	# Loop over the list of redundantPlacements, if its corresponding placement has not been recorded in listOfProbableNodes, add it
-	# listOfCorrespondingPlacements records the corresponding placements
-	# if bestTopLength != 0, corresponding placement at node X = node X
-	# if  bestTopLength == 0, corresponding placement at node X = parent of X
-	listOfCorrespondingPlacements = listOfProbableNodes.copy()
-	for parent, original_node, optimizedScore, blengths in redundantPlacements:
-		# only consider placement whose parent is not None
-		if parent:
-			# check if the corresponding placement has not been recorded in listOfCorrespondingPlacements
-			i = 0
-			for i in range(len(listOfCorrespondingPlacements)):
-				if listOfCorrespondingPlacements[i] == parent:
-					break
-
-			# if the corresponding placement has been recorded in listOfCorrespondingPlacements, update the best score
-			if i < len(listOfCorrespondingPlacements):
-				if listofLKcosts[i] < optimizedScore:
-					listofLKcosts[i] = optimizedScore
-					listOfOptBlengths[i] = blengths
-					listOfProbableNodes[i] = parent
-					#listOfProbableNodes[i] = original_node
-			# otherwise, if the corresponding placement has NOT been recorded in listOfProbableNodes, add this placement
-			else:
-				listofLKcosts.append(optimizedScore)
-				listOfProbableNodes.append(parent)
-				#listOfProbableNodes.append(original_node)
-				listOfOptBlengths.append(blengths)
-				listOfCorrespondingPlacements.append(parent)
-
-	return listOfProbableNodes, listofLKcosts, listOfOptBlengths
 
 #function to find the best node in the tree where to append the new sample; traverses the tree and tries to append the sample at each node and mid-branch nodes, 
 # but stops traversing when certain criteria are met.
@@ -5946,8 +5886,8 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 		listOfProbableNodes=[]
 		listofLKcosts=[]
 		rootAlreadyConsidered=False
-		redundantPlacements = []
 		listOfOptBlengths = []
+		placementAtRoot = None
 	for nodePair in bestNodes:
 		score=nodePair[1]
 		if (score>=bestLKdiff-thresholdLogLKoptimization) or (computePlacementSupportOnly and score>=bestLKdiff-thresholdLogLKoptimizationTopology):
@@ -6020,8 +5960,6 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 				# or at the sibling of X with bestTopLength = 0
 				if (not bestTopLength):
 					differentNode=False
-					# record the redundant placements for processing later
-					redundantPlacements.append([None, t1, optimizedScore, (bestTopLength,bestBottomLength,bestAppendingLength)])
 				if dist[t1]<=effectivelyNon0BLen:
 					differentNode=False
 				# check if this is a root placement
@@ -6031,16 +5969,41 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 						topNode=up[topNode]
 					if up[topNode]==None:
 						rootAlreadyConsidered=True
-						listofLKcosts.append(optimizedScore)
-						listOfProbableNodes.append(topNode)
-						listOfOptBlengths.append((bestTopLength,bestBottomLength,bestAppendingLength))
+						#listofLKcosts.append(optimizedScore)
+						#listOfProbableNodes.append(topNode)
+						#listOfOptBlengths.append((bestTopLength,bestBottomLength,bestAppendingLength))
+						# record the placement at root
+						placementAtRoot = (topNode, optimizedScore, (bestTopLength, bestBottomLength, bestAppendingLength))
 				elif differentNode: #add placement to the list of legit ones
 					listofLKcosts.append(optimizedScore)
 					listOfProbableNodes.append(t1)
 					listOfOptBlengths.append((bestTopLength, bestBottomLength, bestAppendingLength))
 
 	if computePlacementSupportOnly:
-		listOfProbableNodes, listofLKcosts, listOfOptBlengths = processRedundantPlacements(tree, redundantPlacements, listOfProbableNodes, listofLKcosts, listOfOptBlengths)
+		# add the placement at root if no placements at any of its children has been recored
+		if placementAtRoot:
+			addPlacementAtRoot = True
+			if children[root]:
+				rootChild1 = children[root][0]
+				rootChild2 = children[root][1]
+				for placement in listOfProbableNodes:
+					if placement == rootChild1 or placement == rootChild2:
+						addPlacementAtRoot = False
+						break
+			# if no placements at any of its children has been recored
+			# add the placement at root
+			if addPlacementAtRoot:
+				t1, optimizedScore, bestBlengths = placementAtRoot
+				listofLKcosts.append(optimizedScore)
+				listOfProbableNodes.append(t1)
+				listOfOptBlengths.append(bestBlengths)
+
+		# make sure at least one placement was found
+		# because there are cases where all placements were considered as redundant
+		if len(listOfProbableNodes) == 0:
+			listofLKcosts.append(bestScore)
+			listOfProbableNodes.append(bestNode)
+			listOfOptBlengths.append(bestBranchLengths)
 
 		# calculate support(s) of possible placements
 		totSupport=0
