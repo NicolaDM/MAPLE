@@ -6005,6 +6005,23 @@ def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnl
 			listOfProbableNodes.append(bestNode)
 			listOfOptBlengths.append(bestBranchLengths)
 
+		# Loop over all placements, if topBlength == 0, record the parent node instead of the original one
+		for i in range(len(listOfOptBlengths)):
+			topBlength, bottomBlength, appendingBlength = listOfOptBlengths[i]
+			if not topBlength:
+				topNode = listOfProbableNodes[i]
+				# go to the top of the polytomy
+				while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
+					topNode = up[topNode]
+				# go to the top of the polytomy of the parent node
+				if up[topNode] != None:
+					topNode = up[topNode]
+					while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
+						topNode = up[topNode]
+					# update the placement
+					listOfProbableNodes[i] = topNode
+					listOfOptBlengths[i] = dist[topNode], topBlength, appendingBlength
+
 		# calculate support(s) of possible placements
 		totSupport=0
 		for i in range(len(listofLKcosts)):
