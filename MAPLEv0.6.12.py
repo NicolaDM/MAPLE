@@ -5,6 +5,8 @@ from time import time
 import os.path
 from operator import itemgetter
 
+from joblib import Parallel, delayed
+
 #©EMBL-European Bioinformatics Institute, 2021-2023
 #Developd by Nicola De Maio, with contributions from Myrthe Willemsen.
 
@@ -81,6 +83,11 @@ parser.add_argument('--assignmentFileCSV',default="", help='give path and name t
 parser.add_argument('--assignmentFile',default="", help='Like --assignmentFileCSV but expects an alignment file in any format (as long as sequence names follow a > character as in Fasta and Maple formats).')
 parser.add_argument('--inputNexusTree',default="", help='input nexus tree file name; this is optional, and is used for lineage assignment. The nexus tree is supposed to be the output of MAPLE, so that it has alternativePlacements annotation to represent topological uncertainty.')
 parser.add_argument('--reRoot',default="", help='Re-root the input newick tree so that the specified sample/lineage is root. By default, no specified lineage/sample, so no rerooting.')
+#lineage assignment from reference genomes which are not in the tree yet
+parser.add_argument('--lineageRefs',default="", help='give path and name to an alignment file (in MAPLE format) containing reference genomes, each represents one lineage. When using this option, option --inputTree should also be used. Then MAPLE will find the best placement for each lineage reference. Each sample is assigned a lineage same as its closest reference parent.')
+parser.add_argument('--lineageRefsThresh',default=1.0, help='The threshold (in term of #mutation) to check whether a reference lineage genome could be considered as the parent of a subtree. Default: 1 mutation', type = float)
+parser.add_argument('--allowMultiLineagesPerNode', help='When a node is selected as the best placements for multiple lineages, whether we allow assigning all of these lineages (or only the closest lineage) to the subtree. Default: assigning the closet lineage', action="store_true")
+
 #rarer options
 parser.add_argument("--defaultBLen",help="Default length of branches, for example when the input tree has no branch length information.",  type=float, default=0.000033)
 parser.add_argument("--normalizeInputBLen",help="For the case the input tree has branch lengths expressed not in a likelihood fashion (that is, expected number of substitutions per site), then multiply the input branch lengths by this factor. Particularly useful when using parsimony-based input trees.",  type=float, default=1.0)
@@ -117,6 +124,9 @@ debugging=args.debugging
 inputFile=args.input
 outputFile=args.output
 refFile=args.reference
+lineageRefs=args.lineageRefs
+lineageRefsThresh = args.lineageRefsThresh
+allowMultiLineagesPerNode = args.allowMultiLineagesPerNode
 allowedFails=args.allowedFails
 allowedFailsTopology=args.allowedFailsTopology
 model=args.model
@@ -226,7 +236,7 @@ minMutProb=args.minMutProb
 doNotImproveTopology=args.doNotImproveTopology
 keepInputIQtreeSupports=args.keepInputIQtreeSupports
 aBayesPlusOn=False
-if aBayesPlus:
+if aBayesPlus or lineageRefs != "":
 	import math
 
 warnedBLen=[False]
@@ -1168,6 +1178,7 @@ def stringForNode(tree,nextNode,nameNode,distB,estimateMAT=estimateMAT,networkOu
 	up=tree.up
 	name=tree.name
 	aBayesPlusActive=False
+	writeLineageAssignment = performLineageAssignment or performLineageAssignmentByRefPlacement
 	if aBayesPlusOn and hasattr(tree, 'alternativePlacements') and hasattr(tree, 'support'):
 		aBayesPlusActive=True
 		alternativePlacements=tree.alternativePlacements
@@ -1185,7 +1196,7 @@ def stringForNode(tree,nextNode,nameNode,distB,estimateMAT=estimateMAT,networkOu
 		if usingErrorRate and hasattr(tree, 'errors'):
 			errorsOn=True
 			errors=tree.errors
-	if performLineageAssignment:
+	if writeLineageAssignment:
 		lineage=tree.lineage
 		lineages=tree.lineages
 	printIQtreeSupportForNode=False
@@ -1323,7 +1334,7 @@ def stringForNode(tree,nextNode,nameNode,distB,estimateMAT=estimateMAT,networkOu
 			#stringList.append("IQsupport="+str(IQsupport[nextNode]))
 			strings.append("IQsupport="+str(IQsupport[nextNode]))
 			#stringList.append("]")
-	elif performLineageAssignment and (lineage[nextNode]!=None or lineages[nextNode]!=None):
+	elif writeLineageAssignment and (lineage[nextNode]!=None or lineages[nextNode]!=None):
 		#stringList.append("[&")
 		if lineage[nextNode]!=None:
 			#stringList.append("lineage="+lineage[nextNode])
@@ -1371,6 +1382,7 @@ def createNewick(tree,node,binary=True,namesInTree=None,includeMinorSeqs=True,es
 	dist=tree.dist
 	name=tree.name
 	minorSequences=tree.minorSequences
+	writeLineageAssignment = performLineageAssignment or performLineageAssignmentByRefPlacement
 	while nextNode!=None:
 		if children[nextNode]:
 			if direction==0:
@@ -1390,7 +1402,7 @@ def createNewick(tree,node,binary=True,namesInTree=None,includeMinorSeqs=True,es
 							stringList.append(")")
 						else:
 							stringList.append(")"+namesInTree[name[nextNode]])
-					if aBayesPlusOn or estimateMAT or performLineageAssignment:
+					if aBayesPlusOn or estimateMAT or writeLineageAssignment:
 						stringList.append(stringForNode(tree,nextNode,"",dist[nextNode],estimateMAT=estimateMAT,networkOutput=networkOutput,aBayesPlusOn=aBayesPlusOn,namesInTree=namesInTree))
 					if dist[nextNode]:
 						stringList.append(":"+str(dist[nextNode]))
@@ -1408,7 +1420,7 @@ def createNewick(tree,node,binary=True,namesInTree=None,includeMinorSeqs=True,es
 				if binary:
 					for i in minorSequences[nextNode]:
 						stringList.append("(")
-					if supportForIdenticalSequences or performLineageAssignment:
+					if supportForIdenticalSequences or writeLineageAssignment:
 						if namesInTree==None:
 							stringList.append(stringForNode(tree,nextNode,name[nextNode],0.0,estimateMAT=estimateMAT,networkOutput=networkOutput,aBayesPlusOn=aBayesPlusOn,namesInTree=namesInTree))
 						else:
@@ -1422,7 +1434,7 @@ def createNewick(tree,node,binary=True,namesInTree=None,includeMinorSeqs=True,es
 					stringList.append(":")
 					for s2 in minorSequences[nextNode][:-1]:
 						stringList.append("0.0,")
-						if supportForIdenticalSequences or performLineageAssignment:
+						if supportForIdenticalSequences or writeLineageAssignment:
 							if namesInTree==None:
 								stringList.append(stringForNode(tree,nextNode,s2,0.0,estimateMAT=estimateMAT,networkOutput=networkOutput,aBayesPlusOn=aBayesPlusOn,namesInTree=namesInTree))
 							else:
@@ -1434,7 +1446,7 @@ def createNewick(tree,node,binary=True,namesInTree=None,includeMinorSeqs=True,es
 								stringList.append(namesInTree[s2])
 						stringList.append(":0.0):")
 					stringList.append("0.0,")
-					if supportForIdenticalSequences or performLineageAssignment:
+					if supportForIdenticalSequences or writeLineageAssignment:
 						if namesInTree==None:
 							stringList.append(stringForNode(tree,nextNode,minorSequences[nextNode][-1],0.0,estimateMAT=estimateMAT,networkOutput=networkOutput,aBayesPlusOn=aBayesPlusOn,namesInTree=namesInTree))
 						else:
@@ -1451,7 +1463,7 @@ def createNewick(tree,node,binary=True,namesInTree=None,includeMinorSeqs=True,es
 				else:
 					if dist[nextNode] or up[nextNode]==None:
 						stringList.append("(")
-					if supportForIdenticalSequences or performLineageAssignment:
+					if supportForIdenticalSequences or writeLineageAssignment:
 						if namesInTree==None:
 							stringList.append(stringForNode(tree,nextNode,name[nextNode],0.0,estimateMAT=estimateMAT,networkOutput=networkOutput,aBayesPlusOn=aBayesPlusOn,namesInTree=namesInTree))
 						else:
@@ -1465,7 +1477,7 @@ def createNewick(tree,node,binary=True,namesInTree=None,includeMinorSeqs=True,es
 					stringList.append(":0.0")
 					for s2 in minorSequences[nextNode]:
 						stringList.append(",")
-						if supportForIdenticalSequences or performLineageAssignment:
+						if supportForIdenticalSequences or writeLineageAssignment:
 							if namesInTree==None:
 								stringList.append(stringForNode(tree,nextNode,s2,0.0,estimateMAT=estimateMAT,networkOutput=networkOutput,aBayesPlusOn=aBayesPlusOn,namesInTree=namesInTree))
 							else:
@@ -1487,7 +1499,7 @@ def createNewick(tree,node,binary=True,namesInTree=None,includeMinorSeqs=True,es
 				else:
 					if name[nextNode]!="":
 						stringList.append(namesInTree[name[nextNode]])
-			if aBayesPlusOn or estimateMAT or performLineageAssignment:
+			if aBayesPlusOn or estimateMAT or writeLineageAssignment:
 				stringList.append(stringForNode(tree,nextNode,"",dist[nextNode],estimateMAT=estimateMAT,networkOutput=networkOutput,aBayesPlusOn=aBayesPlusOn,namesInTree=namesInTree))
 			if dist[nextNode]:
 				stringList.append(":"+str(dist[nextNode]))
@@ -2098,6 +2110,45 @@ if refFile=="":
 else:
 	ref=collectReference(refFile)
 	data=readConciseAlignment(inputFile, extractReference=False, ref=ref) #,extractNames=extractNamesFlag
+
+# read lineage references
+performLineageAssignmentByRefPlacement = False
+if lineageRefs != "":
+	performLineageAssignmentByRefPlacement = True
+
+	# don't allow running two lineage assignment methods at the same time
+	if assignmentFile!="" and assignmentFileCSV!="":
+		print("Please only use one among these options: --assignmentFile or --assignmentFileCSV or --lineageRefs.")
+		raise Exception("exit")
+
+	# make sure users specify a tree
+	if (not os.path.isfile(inputTree)):
+		print("Input tree in newick format "+inputTree+" not found, quitting MAPLE lineage assignment. Use option --inputTree to specify a valid input tree file.")
+		raise Exception("exit")
+
+	# check if file exits
+	if not os.path.isfile(lineageRefs):
+		print(
+			"Lineage reference file in Maple format " + lineageRefs + " not found.")
+		raise Exception("exit")
+
+	# don't allow rerooting the tree -> the program terminates immediately after lineage assignment
+	# doNotReroot = True
+
+	# read the lineage reference genomes
+	if refFile == "":
+		ref2, lineageRefData = readConciseAlignment(lineageRefs)
+	else:
+		ref2 = collectReference(refFile)
+		lineageRefData = readConciseAlignment(lineageRefs, extractReference=False, ref=ref2)
+
+	# make sure lineageRefs uses the same ref genome with the input alignment
+	if ref2 != ref:
+		refSrcFile = refFile
+		if refSrcFile == "":
+			refSrcFile = inputFile
+		print("Reference genome in ", lineageRefs, " is different from that of ", refSrcFile)
+		raise Exception("exit")
 		
 lRef=len(ref)
 globalTotRate=-float(lRef)
@@ -2109,6 +2160,7 @@ thresholdLogLKtopology*=logLRef
 thresholdLogLK*=logLRef
 thresholdLogLKtopologyInitial*=logLRef
 effectivelyNon0BLen=1.0/(10*lRef)
+lineageRefsThresh /= lRef
 	
 minimumCarryOver=sys.float_info.min*(1e50)
 
@@ -5699,10 +5751,11 @@ def findBestRoot(tree,root,strictTopologyStopRules=strictTopologyStopRules,allow
 
 
 numMinorsFound=[0]
+
 #function to find the best node in the tree where to append the new sample; traverses the tree and tries to append the sample at each node and mid-branch nodes, 
 # but stops traversing when certain criteria are met.
 #TODO account for HnZ modifiers in placement search
-def findBestParentForNewSample(tree,root,diffs,sample):
+def findBestParentForNewSample(tree,root,diffs,sample,computePlacementSupportOnly):
 	up=tree.up
 	children=tree.children
 	probVectUpRight=tree.probVectUpRight
@@ -5726,7 +5779,8 @@ def findBestParentForNewSample(tree,root,diffs,sample):
 			comparison=isMinorSequence(probVect[root],diffs,onlyFindIdentical=True)
 		else:
 			comparison=isMinorSequence(probVect[root],diffs)
-		if comparison==1:
+		# if we need to compute the placement support only, we have to process further and can't add the new sample as a minor sequence
+		if comparison==1 and not computePlacementSupportOnly:
 			minorSequences[root].append(sample)
 			#TODO
 			if HnZ:
@@ -5758,7 +5812,8 @@ def findBestParentForNewSample(tree,root,diffs,sample):
 				comparison=isMinorSequence(probVect[t1],diffs,onlyFindIdentical=True)
 			else:
 				comparison=isMinorSequence(probVect[t1],diffs)
-			if comparison==1:
+			# if we need to compute the placement support only, we have to process further and can't add the new sample as a minor sequence
+			if comparison==1 and not computePlacementSupportOnly:
 				minorSequences[t1].append(sample)
 				#TODO
 				if HnZ:
@@ -5827,9 +5882,15 @@ def findBestParentForNewSample(tree,root,diffs,sample):
 		bestBranchLengths=(dist[bestNode]/2,dist[bestNode]/2,oneMutBLen)
 	bestScore=bestLKdiff
 	compensanteForBranchLengthChange=True
+	if computePlacementSupportOnly:
+		listOfProbableNodes=[]
+		listofLKcosts=[]
+		rootAlreadyConsidered=False
+		listOfOptBlengths = []
+		placementAtRoot = None
 	for nodePair in bestNodes:
 		score=nodePair[1]
-		if score>=bestLKdiff-thresholdLogLKoptimization:
+		if (score>=bestLKdiff-thresholdLogLKoptimization) or (computePlacementSupportOnly and score>=bestLKdiff-thresholdLogLKoptimizationTopology):
 			node=nodePair[0]
 			#optimize branch lengths of appendage
 			if node==children[up[node]][0]:
@@ -5879,7 +5940,105 @@ def findBestParentForNewSample(tree,root,diffs,sample):
 				bestBranchLengths=(bestTopLength,bestBottomLength,bestAppendingLength)
 				bestDiffs=diffs
 
-	return bestNode, bestScore, bestBranchLengths, bestDiffs
+			if computePlacementSupportOnly:
+				t1 = node
+				#check that the placement location is effectively different from the original node
+				differentNode=True
+				#topNode=node
+				#if t1 == topNode:
+				#	differentNode = False
+				#if (not bestBottomLength):
+				#	while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
+				#		topNode = up[topNode]
+				#	if t1 == topNode:
+				#		differentNode = False
+				#if t1 == children[node][1 - child]:
+				#	differentNode = False
+				#check that placement is not redundant
+				# a placement at node X with bestTopLength = 0 could be presented by another placement:
+				# at the parent of X with bestBottomLength = 0
+				# or at the sibling of X with bestTopLength = 0
+				if (not bestTopLength):
+					differentNode=False
+				if dist[t1]<=effectivelyNon0BLen:
+					differentNode=False
+				# check if this is a root placement
+				if (not rootAlreadyConsidered) and (not bestTopLength):
+					topNode=up[t1]
+					while (dist[topNode]<=effectivelyNon0BLen) and (up[topNode]!=None):
+						topNode=up[topNode]
+					if up[topNode]==None:
+						rootAlreadyConsidered=True
+						#listofLKcosts.append(optimizedScore)
+						#listOfProbableNodes.append(topNode)
+						#listOfOptBlengths.append((bestTopLength,bestBottomLength,bestAppendingLength))
+						# record the placement at root
+						placementAtRoot = (topNode, optimizedScore, (bestTopLength, bestBottomLength, bestAppendingLength))
+				elif differentNode: #add placement to the list of legit ones
+					listofLKcosts.append(optimizedScore)
+					listOfProbableNodes.append(t1)
+					listOfOptBlengths.append((bestTopLength, bestBottomLength, bestAppendingLength))
+
+	if computePlacementSupportOnly:
+		# add the placement at root if no placements at any of its children has been recored
+		if placementAtRoot:
+			addPlacementAtRoot = True
+			if children[root]:
+				rootChild1 = children[root][0]
+				rootChild2 = children[root][1]
+				for placement in listOfProbableNodes:
+					if placement == rootChild1 or placement == rootChild2:
+						addPlacementAtRoot = False
+						break
+			# if no placements at any of its children has been recored
+			# add the placement at root
+			if addPlacementAtRoot:
+				t1, optimizedScore, bestBlengths = placementAtRoot
+				listofLKcosts.append(optimizedScore)
+				listOfProbableNodes.append(t1)
+				listOfOptBlengths.append(bestBlengths)
+
+		# make sure at least one placement was found
+		# because there are cases where all placements were considered as redundant
+		if len(listOfProbableNodes) == 0:
+			listofLKcosts.append(bestScore)
+			listOfProbableNodes.append(bestNode)
+			listOfOptBlengths.append(bestBranchLengths)
+
+		# Loop over all placements, if topBlength == 0, record the parent node instead of the original one
+		for i in range(len(listOfOptBlengths)):
+			topBlength, bottomBlength, appendingBlength = listOfOptBlengths[i]
+			if not topBlength:
+				topNode = listOfProbableNodes[i]
+				# go to the top of the polytomy
+				while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
+					topNode = up[topNode]
+				# go to the top of the polytomy of the parent node
+				if up[topNode] != None:
+					topNode = up[topNode]
+					while (dist[topNode] <= effectivelyNon0BLen) and (up[topNode] != None):
+						topNode = up[topNode]
+					# update the placement
+					listOfProbableNodes[i] = topNode
+					listOfOptBlengths[i] = dist[topNode], topBlength, appendingBlength
+
+		# calculate support(s) of possible placements
+		totSupport=0
+		for i in range(len(listofLKcosts)):
+			listofLKcosts[i]=math.exp(listofLKcosts[i])
+			totSupport+=listofLKcosts[i]
+
+		possiblePlacements=[]
+		for i in range(len(listofLKcosts)):
+			listofLKcosts[i]=listofLKcosts[i]/totSupport
+		for i in range(len(listofLKcosts)):
+			if listofLKcosts[i]>=minBranchSupport:
+				possiblePlacements.append((listOfProbableNodes[i],listofLKcosts[i],listOfOptBlengths[i]))
+
+		# return possiblePlacements
+		return possiblePlacements
+	else:
+		return bestNode, bestScore, bestBranchLengths, bestDiffs
 
 
 # Change the genome lists of the node and edescendants after making the node reference. Also change nDesc of the ancestor nodes.
@@ -8292,6 +8451,398 @@ if (numSamples>1) and (model!="JC" or ((numSamples>=minNumSamplesForRateVar) and
 	timeRecalculation=time()-start
 	print("Time to run initial tree EM estimation: "+str(timeRecalculation))
 
+# This function was moved upward to be used in Lineage Assignments by Lineage reference genomes
+#generate the string corresponding to a line of the tsv file for use in Taxonium.
+# If representative node is 0-dist, then its support is also the support of all represented nodes. If not, can we assume that the support of the represented nodes is 1.
+# Includes support of represented nodes only if supportFor0Branches is true, otherwise smpty string.
+def tsvForNode(tree,node,name,featureList,namesInTree,identicalTo=""):
+	dist=tree.dist
+	stringList=[name+"\t"]
+	if identicalTo!="":
+		stringList.append(identicalTo)
+	stringList.append("\t")
+	for feat in featureList:
+		if node!=None:
+			if hasattr(tree, feat):
+				feature=getattr(tree, feat)
+				if (feat=="support" or feat=="IQsupport") :
+					if feature[node]!=None:
+					#if feat=="support" : #dist[node]<=effectivelyNon0BLen:
+						if feat=="support":
+							if identicalTo!="":
+								if supportForIdenticalSequences:
+									if dist[node]<=effectivelyNon0BLen:
+										stringList.append(str(feature[node]))
+									else:
+										stringList.append("1.0")
+							else:
+								stringList.append(str(feature[node]))
+						else:
+							stringList.append(str(feature[node]))
+				#use this column to highlight which nodes could be placed (with probability above threshold) on the branch above the current node - used to highlight alternative placements of a given node on the tree.
+				elif feat=="supportTo" and identicalTo=="":
+					for iNode in range(len(feature[node])):
+						stringList.append(namesInTree[tree.name[feature[node][iNode][0]]]+":"+str(feature[node][iNode][1]))
+						if iNode<(len(feature[node])-1):
+							stringList.append(",")
+				# use this column to highlight which lineages could be placed (with probability above threshold) on the branch above the current node - used to highlight alternative placements of a given lineage on the tree.
+				elif feat == "supportToLineages" and identicalTo == "":
+					for iNode in range(len(feature[node])):
+						stringList.append(feature[node][iNode][0] + ":" + str(
+							feature[node][iNode][1]))
+						if iNode < (len(feature[node]) - 1):
+							stringList.append(";")
+				# elif feat=="alternativePlacements":
+				# 	for iNode in range(len(feature[node])):
+				# 		stringList.append(namesInTree[tree.name[feature[node][iNode][0]]]+":"+str(feature[node][iNode][1]))
+				# 		if iNode<(len(feature[node])-1):
+				# 			stringList.append(",")
+				elif feat=="mutationsInf" and identicalTo=="":
+					for iNode in range(len(feature[node])):
+						mutation=feature[node][iNode]
+						stringList.append(allelesListExt[mutation[0]]+str(mutation[1])+allelesListExt[mutation[2]]+":"+str(mutation[3]))
+						if iNode<(len(feature[node])-1):
+							stringList.append(",")
+				elif feat=="Ns":
+					if identicalTo=="" or supportFor0Branches:
+						for iNode in range(len(feature[node])):
+							mutation=feature[node][iNode]
+							if type(mutation)==int:
+								stringList.append(str(mutation))
+							else:
+								stringList.append(str(mutation[0])+"-"+str(mutation[1]))
+							if iNode<(len(feature[node])-1):
+								stringList.append(",")
+				elif feat=="errors":
+					for iNode in range(len(feature[node])):
+						mutation=feature[node][iNode]
+						stringList.append(allelesListExt[mutation[0]]+str(mutation[1])+allelesListExt[mutation[2]]+":"+str(mutation[3]))
+						if iNode<(len(feature[node])-1):
+							stringList.append(",")
+				elif feat=="lineage":
+					stringList.append(feature[node])
+				elif feat=="lineages":
+					for lineageName in feature[node].keys():
+						stringList.append(lineageName+":"+str(feature[node][lineageName]))
+						stringList.append(",")
+					stringList.pop()
+				elif feat=="rootSupport" and identicalTo=="":
+					if feature[node]!=None:
+						stringList.append(str(feature[node]))
+			# this column highlights nodes with support below threshold and with number of descendants above threshold
+			elif feat=="supportGroup":
+				if tree.support[node]!=None:
+					if tree.support[node]<0.9:
+						nDescString="nDesc<11_"
+						if identicalTo=="":
+							if tree.nDesc[node]>100000:
+								nDescString="nDesc>100000_"
+							elif tree.nDesc[node]>10000:
+								nDescString="nDesc>10000_"
+							elif tree.nDesc[node]>1000:
+								nDescString="nDesc>1000_"
+							elif tree.nDesc[node]>100:
+								nDescString="nDesc>100_"
+							elif tree.nDesc[node]>10:
+								nDescString="nDesc>10_"
+						if tree.support[node]<0.5:
+							nDescString+="support<0.5"
+						else:
+							nDescString+="support<0.9"
+					else:
+						nDescString=""
+					stringList.append(nDescString)
+		stringList.append("\t")
+	stringList[-1]="\n"
+	#stringList.append("\n")
+	return "".join(stringList)
+
+# seek placements for a chunk that contains a subset of lineage reference genomes
+def process_chunk(job_id, start, end, lineageRefNames, tree, t1, lineageRefData):
+	chunk_output = []
+	numSamples = 0
+	totalSamples = end - start
+	# Process a chunk of tasks and return results
+	for lineageRefName in lineageRefNames[start:end]:
+		# extract the partial of the lineage reference genome
+		newPartials = probVectTerminalNode(lineageRefData[lineageRefName], None, None)
+
+		# find the best placement for the lineage reference genome
+		possiblePlacements = findBestParentForNewSample(tree, t1, newPartials, numSamples,
+														computePlacementSupportOnly=True)
+
+		# finetune the placement position
+		if len(possiblePlacements):
+			# sort possiblePlacements by placement's support descending
+			sortedPlacements = sorted(possiblePlacements, key=lambda x: x[1], reverse=True)
+
+		else:
+			print(f"Something went wrong: possiblePlacements for {lineageRefName} is empty")
+			raise Exception("exit")
+
+		chunk_output.append((lineageRefName, sortedPlacements))
+
+		# update progress
+		numSamples += 1
+		if numSamples % 50 == 0 or numSamples == totalSamples:
+			print(f"JobID {job_id} processed {numSamples}/{totalSamples}")
+
+	return chunk_output
+
+# seek placements for lineage reference genomes
+def seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores):
+	dist = tree.dist
+	up = tree.up
+	# create a map from a lineage to its possible placements
+	tree.lineagePlacements = {}
+	lineageRefNames = list(lineageRefData.keys())
+	chunk_size = (len(lineageRefNames) + numCores - 1) // numCores  # Ensures rounding up
+	chunks = [(i, min(i + chunk_size, len(lineageRefNames))) for i in range(0, len(lineageRefNames), chunk_size)]
+
+	# Parallelize over chunks
+	results = Parallel(n_jobs=numCores)(
+		delayed(process_chunk)(job_id, start, end, lineageRefNames, tree, t1, lineageRefData) for job_id, (start, end) in enumerate(chunks)
+	)
+
+	for chunk_output in results:
+		for lineageRefName, sortedPlacements in chunk_output:
+			# delete lineage genome that is already processed
+			lineageRefData[lineageRefName] = None
+
+			# extract the best placement (with the highest support)
+			selectedPlacement = sortedPlacements[0][0]
+			topBlength, bottomBlength, appendingBlength = sortedPlacements[0][2]
+
+			# append the lineage assignment into the selected node
+			lineageRootPosition = None
+			if appendingBlength <= lineageRefsThresh:
+				# if topBlength == 0, we already record the parent instead of the original placement, so no further processing needed
+				#if not topBlength and up[selectedPlacement]:
+				#	selectedPlacement = up[selectedPlacement]
+					# traverse upward to the top of the polytomy
+				#	while (dist[selectedPlacement] <= effectivelyNon0BLen) and (up[selectedPlacement] != None):
+				#		selectedPlacement = up[selectedPlacement]
+				tree.lineageAssignments[selectedPlacement].append([lineageRefName, bottomBlength])
+				lineageRootPosition = selectedPlacement
+
+			# update the list of possible placements for this lineage
+			tree.lineagePlacements[lineageRefName] = (sortedPlacements, lineageRootPosition)
+
+	# a node may be assigned multiple lineages
+	for node in range(len(tree.lineageAssignments)):
+		lineageAssignments = tree.lineageAssignments[node]
+
+		# assign the list of lineages to this node
+		if len(lineageAssignments) > 0:
+			# when a node is descendant of multiple references,
+			# assign all these lineages to this node
+			if allowMultiLineagesPerNode:
+				tree.lineage[node] = "/".join(lineageRefName for lineageRefName, _ in lineageAssignments)
+			# otherwise, we assign the phylogenetically closest one to it
+			else:
+				closestLineage = lineageAssignments[0][0]
+				closetDistance = lineageAssignments[0][1]
+				for i in range(1, len(lineageAssignments)):
+					if lineageAssignments[i][1] < closetDistance:
+						closestLineage = lineageAssignments[i][0]
+						closetDistance = lineageAssignments[i][1]
+				tree.lineage[node] = closestLineage
+
+	return tree
+
+# Annotate nodes by their lineage assignments
+def annotateLineageAssignments(tree, root):
+	children = tree.children
+	lineages = tree.lineage
+
+	# traverse the tree and annotate nodes with their lineage assignments
+	# start from the root
+	nodesToVisit = []
+	# If root is not assigned a lineage
+	# set lineages[root] = "-" instead of None
+	if not lineages[root]:
+		lineages[root] = "-"
+	for child in children[root]:
+		nodesToVisit.append((child, lineages[root]))
+	while nodesToVisit:
+		node, lineage = nodesToVisit.pop()
+
+		# if this node has NOT been already assigned any lineage,
+		# inherit the assignment from its parent node
+		if not lineages[node]:
+			lineages[node] = lineage
+
+		# traverse downward to children nodes
+		for child in children[node]:
+			nodesToVisit.append((child, lineages[node]))
+
+	# synchronize lineages to tree
+	tree.lineage = lineages
+
+	# return the updated tree
+	return tree
+
+def defineSupportedToLineages(tree):
+	# init supportToLineages
+	numNodes = len(tree.up)
+	tree.supportToLineages = [[] for _ in range(numNodes)]
+	lineagePlacements = tree.lineagePlacements
+	for key in lineagePlacements:
+		plausiblePlacements, lineageRootPosition = lineagePlacements[key]
+		for placement, support, optimizedBlengths in plausiblePlacements:
+			topBlength, bottomBlength, appendingBlength = optimizedBlengths
+			if appendingBlength <= lineageRefsThresh:
+				tree.supportToLineages[placement].append([key, support])
+	return tree
+
+# Write lineage assignments to output file
+def outputLineageAssignments(outputFile, tree, root):
+	tree = defineSupportedToLineages(tree)
+	# ------------ write TSV file ------------------
+	giveInternalNodeNames(tree, t1, namesInTree=namesInTree, replaceNames=False)
+	file = open(outputFile + "_metaData_lineageAssignment.tsv", "w")
+
+	children = tree.children
+	up = tree.up
+	name = tree.name
+	minorSequences = tree.minorSequences
+	featureNames = {}
+	featureNames['lineage'] = 'lineage'
+	featureNames['supportToLineages'] = 'supportToLineages'
+	featureList = list(featureNames.keys())
+	file.write("strain" + "\t" + "collapsedTo")
+	for feat in featureList:
+		file.write("\t" + featureNames[feat])
+	file.write("\n")
+	# now write to file the features for each node of the tree.
+	nextNode = root
+	direction = 0
+	numLeaves = 0
+	while nextNode != None:
+		if children[nextNode]:
+			if direction == 0:
+				nextNode = children[nextNode][0]
+			elif direction == 1:
+				nextNode = children[nextNode][1]
+				direction = 0
+			else:
+				file.write(tsvForNode(tree, nextNode, namesInTree[name[nextNode]], featureList, namesInTree))
+				if up[nextNode] != None:
+					if children[up[nextNode]][0] == nextNode:
+						direction = 1
+					else:
+						direction = 2
+				nextNode = up[nextNode]
+		else:
+			numLeaves += (1 + len(minorSequences[nextNode]))
+			if len(minorSequences[nextNode]) > 0:
+				file.write(tsvForNode(tree, nextNode, namesInTree[name[nextNode]], featureList, namesInTree,
+										  identicalTo=namesInTree[name[nextNode]] + "_MinorSeqsClade"))
+
+				for s2 in minorSequences[nextNode]:
+					file.write(tsvForNode(tree, nextNode, namesInTree[s2], featureList, namesInTree,
+											  identicalTo=namesInTree[name[nextNode]] + "_MinorSeqsClade"))
+
+
+				file.write(tsvForNode(tree, nextNode, namesInTree[name[nextNode]] + "_MinorSeqsClade", featureList,
+										  namesInTree))
+			else:
+				file.write(tsvForNode(tree, nextNode, namesInTree[name[nextNode]], featureList, namesInTree))
+			if up[nextNode] != None:
+				if children[up[nextNode]][0] == nextNode:
+					direction = 1
+				else:
+					direction = 2
+			nextNode = up[nextNode]
+
+	# close the output file
+	file.close()
+
+	print(f"Output lineage assignments at {outputFile}_metaData_lineageAssignment.tsv.")
+
+	# write TSV mapping from lineage to its possible placements
+	file = open(outputFile + "_metaData_lineagePlacements.tsv", "w")
+	lineagePlacements = tree.lineagePlacements
+	file.write("lineage\tplacements\toptimizedBlengths\tlineageRootPosition\n")
+	for key in lineagePlacements:
+		placementStrVec = []
+		placementBlengthsVec = []
+		plausiblePlacements, lineageRootPosition = lineagePlacements[key]
+		for placement, support, optimizedBlengths in plausiblePlacements:
+			placementStrVec.append(f"{namesInTree[name[placement]]}:{str(support)}")
+			blengthsVec = []
+			for blength in optimizedBlengths:
+				if blength:
+					blengthsVec.append(str(blength))
+				else:
+					blengthsVec.append("0")
+			blengthsStr = "/".join(blengthsVec)
+			placementBlengthsVec.append(f"{namesInTree[name[placement]]}:({blengthsStr})")
+
+		# extract the root position of the lineage (if the current lineage is considered as an ancestral of a subtree)
+		lineageRootPositionStr = "-"
+		if lineageRootPosition != None:
+			lineageRootPositionStr = namesInTree[name[lineageRootPosition]]
+
+		placementStr = ";".join(placementStrVec)
+		placementBlengthsStr = ";".join(placementBlengthsVec)
+		file.write(key + "\t" + placementStr + "\t" + placementBlengthsStr + "\t" + lineageRootPositionStr + "\n")
+
+	# close the output file
+	file.close()
+
+	print(f"Output a map from lineages to their placements at {outputFile}_metaData_lineagePlacements.tsv.")
+	# ------------ end of write TSV file ------------------
+
+	# ------------ write Nexus treefile ------------------
+	newickString = createNewick(tree, root, binary=binaryTree, namesInTree = namesInTree)
+	file = open(outputFile + "_lineageAssignment.tree", "w")
+	file.write("#NEXUS\nbegin taxa;\n	dimensions ntax=" + str(len(namesInTree)) + ";\n	taxlabels\n")
+	for name in namesInTree:
+		file.write("	" + name + "\n")
+	file.write(";\nend;\n\nbegin trees;\n	tree TREE1 = [&R] ")
+	file.write(newickString)
+	file.write("\nend;\n")
+	file.close()
+	print(f"Output Nexus tree with lineage assignments at {outputFile}_lineageAssignment.tree.")
+	# ------------ end of write Nexus treefile ------------------
+
+	# ------------ write Newick treefile ------------------
+	newickString = createNewick(tree, root, binary=binaryTree, namesInTree=namesInTree, estimateMAT=False, networkOutput=False, aBayesPlusOn=False)
+	file = open(outputFile + "_updatedBlengths.tree", "w")
+	file.write(newickString)
+	file.close()
+	print(f"Output Newick tree with updated branch lengths at {outputFile}_updatedBlengths.tree.")
+	# ------------ end of write Newick treefile ------------------
+	# return success
+	return tree
+
+# Process linage assignments by reference genomes
+# Input: tree and lineage reference genomes
+# Output: assignments of nodes (tip and internal nodes) to lineages
+# 1. find a placement for each lineage reference
+# 2. locate the subtree rooted at the placement of each lineage reference; assign all children of that subtree to that lineage
+def assignLineageByReferencePlacement(tree, t1, lineageRefData, numCores):
+	numNodes = len(tree.up)
+	tree.lineageAssignments = [[] for _ in range(numNodes)]
+	tree.lineage = [None] * numNodes
+	tree.lineages = [None] * numNodes # don't use but need to add to reuse other functions
+
+	# 1. Find a placement for each lineage reference
+	tree = seekPlacementOfLineageRefs(tree, t1, lineageRefData, numCores)
+
+	# 2. Annotate nodes by their lineage assignments
+	tree = annotateLineageAssignments(tree, t1)
+
+	# Write lineage assignments to output file
+	outputLineageAssignments(outputFile, tree, t1)
+
+	# terminate the program
+	exit(0)
+
+# Process linage assignments by reference genomes
+if performLineageAssignmentByRefPlacement:
+	assignLineageByReferencePlacement(tree, t1, lineageRefData, numCores)
 
 #Place input samples to create an initial tree (or extend the input tree).
 timeFinding=0.0
@@ -8328,7 +8879,7 @@ if not doNotPlaceNewSamples:
 			print(" EM to update parameters during initial placement terminated, time taken: "+str(time()-start))
 
 		start=time()
-		bestNode , bestScore, bestBranchLengths, bestPassedVect = findBestParentForNewSample(tree,t1,newPartials,numSamples)
+		bestNode , bestScore, bestBranchLengths, bestPassedVect = findBestParentForNewSample(tree,t1,newPartials,numSamples,computePlacementSupportOnly=False)
 		timeFinding+=(time()-start)
 		if bestBranchLengths!=None:
 			start=time()
@@ -8551,104 +9102,6 @@ internalNodeNamesGiven=False
 giveInternalNodeNames(tree,t1,namesInTree=namesInTree,replaceNames=False)
 internalNodeNamesGiven=True
 print(str(len(namesInTree))+" named nodes in the tree after assigning internal node names", flush=True)
-
-#generate the string corresponding to a line of the tsv file for use in Taxonium.
-# If representative node is 0-dist, then its support is also the support of all represented nodes. If not, can we assume that the support of the represented nodes is 1.
-# Includes support of represented nodes only if supportFor0Branches is true, otherwise smpty string.
-def tsvForNode(tree,node,name,featureList,namesInTree,identicalTo=""):
-	dist=tree.dist
-	stringList=[name+"\t"]
-	if identicalTo!="":
-		stringList.append(identicalTo)
-	stringList.append("\t")
-	for feat in featureList:
-		if node!=None:
-			if hasattr(tree, feat):
-				feature=getattr(tree, feat)
-				if (feat=="support" or feat=="IQsupport") :
-					if feature[node]!=None:
-					#if feat=="support" : #dist[node]<=effectivelyNon0BLen:
-						if feat=="support":
-							if identicalTo!="":
-								if supportForIdenticalSequences:
-									if dist[node]<=effectivelyNon0BLen:
-										stringList.append(str(feature[node]))
-									else:
-										stringList.append("1.0")
-							else:
-								stringList.append(str(feature[node]))
-						else:
-							stringList.append(str(feature[node]))
-				#use this column to highlight which nodes could be placed (with probability above threshold) on the branch above the current node - used to highlight alternative placements of a given node on the tree.
-				elif feat=="supportTo" and identicalTo=="":
-					for iNode in range(len(feature[node])):
-						stringList.append(namesInTree[tree.name[feature[node][iNode][0]]]+":"+str(feature[node][iNode][1]))
-						if iNode<(len(feature[node])-1):
-							stringList.append(",")
-				# elif feat=="alternativePlacements":
-				# 	for iNode in range(len(feature[node])):
-				# 		stringList.append(namesInTree[tree.name[feature[node][iNode][0]]]+":"+str(feature[node][iNode][1]))
-				# 		if iNode<(len(feature[node])-1):
-				# 			stringList.append(",")
-				elif feat=="mutationsInf" and identicalTo=="":
-					for iNode in range(len(feature[node])):
-						mutation=feature[node][iNode]
-						stringList.append(allelesListExt[mutation[0]]+str(mutation[1])+allelesListExt[mutation[2]]+":"+str(mutation[3]))
-						if iNode<(len(feature[node])-1):
-							stringList.append(",")
-				elif feat=="Ns":
-					if identicalTo=="" or supportFor0Branches:
-						for iNode in range(len(feature[node])):
-							mutation=feature[node][iNode]
-							if type(mutation)==int:
-								stringList.append(str(mutation))
-							else:
-								stringList.append(str(mutation[0])+"-"+str(mutation[1]))
-							if iNode<(len(feature[node])-1):
-								stringList.append(",")
-				elif feat=="errors":
-					for iNode in range(len(feature[node])):
-						mutation=feature[node][iNode]
-						stringList.append(allelesListExt[mutation[0]]+str(mutation[1])+allelesListExt[mutation[2]]+":"+str(mutation[3]))
-						if iNode<(len(feature[node])-1):
-							stringList.append(",")
-				elif feat=="lineage":
-					stringList.append(feature[node])
-				elif feat=="lineages":
-					for lineageName in feature[node].keys():
-						stringList.append(lineageName+":"+str(feature[node][lineageName]))
-						stringList.append(",")
-					stringList.pop()
-				elif feat=="rootSupport" and identicalTo=="":
-					if feature[node]!=None:
-						stringList.append(str(feature[node]))
-			# this column highlights nodes with support below threshold and with number of descendants above threshold
-			elif feat=="supportGroup":
-				if tree.support[node]!=None:
-					if tree.support[node]<0.9:
-						nDescString="nDesc<11_"
-						if identicalTo=="":
-							if tree.nDesc[node]>100000:
-								nDescString="nDesc>100000_"
-							elif tree.nDesc[node]>10000:
-								nDescString="nDesc>10000_"
-							elif tree.nDesc[node]>1000:
-								nDescString="nDesc>1000_"
-							elif tree.nDesc[node]>100:
-								nDescString="nDesc>100_"
-							elif tree.nDesc[node]>10:
-								nDescString="nDesc>10_"
-						if tree.support[node]<0.5:
-							nDescString+="support<0.5"
-						else:
-							nDescString+="support<0.9"
-					else:
-						nDescString=""
-					stringList.append(nDescString)
-		stringList.append("\t")
-	stringList[-1]="\n"
-	#stringList.append("\n")
-	return "".join(stringList)
 
 
 #calculate number of descendants for each node.
