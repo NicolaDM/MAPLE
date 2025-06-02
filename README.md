@@ -103,8 +103,6 @@ Then open the resulting .jsonl file in Taxonium. For any branch, one can then hi
 
 Option --supportFor0Branches will make SPRTA also evaluate the support of 0-length branches, and therefore in particular the placement of all samples. Expect slightly longer runtime when using this option.
 
-At the moment SPRTA is not compatible with parallelization, it is not therefore possible to use options --SPRTA and --numCores in the same MAPLE run.
-
 
 ### Accounting for lineage abundance
 
