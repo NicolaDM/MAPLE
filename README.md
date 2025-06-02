@@ -4,7 +4,7 @@ MAPLE is a new approach for maximum likelihood phylogenetic estimation for genom
 For a description of the methods used, see De Maio et al. 2023 Nature Genetics [https://doi.org/10.1101/2022.03.22.485312](https://www.nature.com/articles/s41588-023-01368-0).
 For a description of new features including rate variation, a model of sequence errors, parallelization, and an algorithmic improvement, see De Maio et al 2024a [https://doi.org/10.1101/2024.07.12.603240](https://doi.org/10.1101/2024.07.12.603240). 
 For a description of SPRTA, our new approach for assessing phylogenetic uncertainty, see De Maio et al. 2024b [https://doi.org/10.1101/2024.10.21.619398](https://doi.org/10.1101/2024.10.21.619398).
-CMAPLE, the C++ implementation of SPRTA within IQ-TREE, can be found at [https://github.com/iqtree/cmaple](https://github.com/iqtree/cmaple) see Ly-Trong et al. 2024 MBE [https://doi.org/10.1093/molbev/msae134](https://doi.org/10.1093/molbev/msae134).
+CMAPLE, the C++ implementation of MAPLE within IQ-TREE, can be found at [https://github.com/iqtree/cmaple](https://github.com/iqtree/cmaple) see Ly-Trong et al. 2024 MBE [https://doi.org/10.1093/molbev/msae134](https://doi.org/10.1093/molbev/msae134).
 
 
 ### Installation
