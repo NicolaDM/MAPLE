@@ -126,8 +126,8 @@ The tree contained in the file specified with option --inputTree will be compare
 Having multiple trees in this second file is faster than running the script many times with 2 trees at the time, but you will need to specify option --multipleInputRFTrees to prevent MAPLE from only reading the first tree in the file.
 
 
-
-### Benchmarking
+<!--
+%### Benchmarking
 
 We also include in this repository a script that we used to run benchmarking analyses of MAPLE: MAPLE_benchmarking.py .
 Comments at the top of this script will give instructions on how to use it within the context of benchmark analyses.
@@ -174,7 +174,7 @@ Then to prepare the input files for figure generation:
 And finally to generate the figures (will require matplotlib):
 
         python3 MAPLE_benchmarking.py --runFigureGeneration
-    
+    -->
 
 
 <br />
