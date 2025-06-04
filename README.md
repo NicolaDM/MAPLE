@@ -7,6 +7,7 @@ For a description of SPRTA, our new approach for assessing phylogenetic uncertai
 CMAPLE, the C++ implementation of MAPLE within IQ-TREE, can be found at [https://github.com/iqtree/cmaple](https://github.com/iqtree/cmaple) see Ly-Trong et al. 2024 MBE [https://doi.org/10.1093/molbev/msae134](https://doi.org/10.1093/molbev/msae134).
 
 For a full(er) documentation, check the "MAPLE documentation.pdf" file in the repository.
+
 For a tutorial, check the "MAPLE tutorial" file.
 
 
