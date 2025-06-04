@@ -8,7 +8,7 @@ CMAPLE, the C++ implementation of MAPLE within IQ-TREE, can be found at [https:/
 
 For a full(er) documentation, check the "MAPLE documentation.pdf" file in the repository.
 
-For a tutorial, check the "MAPLE tutorial" file.
+For a tutorial, check the "MAPLE tutorial.pdf" file.
 
 
 ### Installation
