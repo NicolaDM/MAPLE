@@ -1,0 +1,10 @@
+message: "If you use this software, please cite it as below."
+authors: Nicola De Maio (with support by Nhan Ly-Trong)
+orcid: https://orcid.org/0000-0002-1776-8564
+title: MAPLE
+version: MAPLEv0.7.4.7
+date-released: 2025-07-21
+Please cite the following articles:
+https://www.nature.com/articles/s41588-023-01368-0
+https://doi.org/10.1101/2024.07.12.603240
+https://doi.org/10.1101/2024.10.21.619398
