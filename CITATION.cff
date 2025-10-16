@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "De Maio"
+  given-names: "Nicola"
+  orcid: "https://orcid.org/0000-0002-1776-8564"
+- family-names: "Ly-Trong"
+  given-names: "Nhan"
+  orcid: "https://orcid.org/0000-0001-5668-5027"
+title: "MAPLE"
+version: 0.7.5
+doi: 10.5281/zenodo.7584634
+date-released: 2025-10-16
+url: "https://github.com/NicolaDM/MAPLE"
